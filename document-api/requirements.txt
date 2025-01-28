@@ -1,0 +1,6 @@
+flask==2.0.3
+flask-cors
+python-bitcoinlib==0.11.0
+python-bitcoinrpc
+werkzeug==2.0.3
+base58

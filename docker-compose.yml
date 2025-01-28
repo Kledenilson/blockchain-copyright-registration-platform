@@ -1,0 +1,40 @@
+
+version: '3.8'
+
+services:
+  bitcoin-core:
+    image: ruimarinho/bitcoin-core:24.0.1
+    container_name: bitcoin-core
+    command: ["bitcoind", "-datadir=/root/.bitcoin", "-regtest", "-server=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0", "-rpcuser=myuser", "-rpcpassword=mypassword", "-txindex=1", "-printtoconsole"]
+    environment:
+      - BITCOIN_NETWORK=regtest
+      - BITCOIN_RPCUSER=myuser
+      - BITCOIN_RPCPASSWORD=mypassword
+      - BITCOIN_RPCALLOWIP=0.0.0.0/0
+      - BITCOIN_DATADIR=/root/.bitcoin
+    ports:
+      - "18443:18443"
+      - "18444:18444"
+    volumes:
+      - ./document-api/bitcoin-data:/root/.bitcoin
+
+  document-api:
+    build: ./document-api
+    container_name: document-api
+    environment:
+      - RPC_USER=myuser
+      - RPC_PASSWORD=mypassword
+      - NETWORK=regtest
+      - FLASK_ENV=development python app.py
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./document-api:/app
+      - ./uploads:/app/uploads
+      - ./document-data:/data
+    depends_on:
+      - bitcoin-core
+
+volumes:
+  bitcoin-data:
+  document-data:
