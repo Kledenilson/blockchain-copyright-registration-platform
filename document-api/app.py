@@ -3,6 +3,7 @@ from flask_cors import CORS
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 from bitcoin.rpc import RawProxy
 import os
+import time, random
 from decimal import Decimal
 
 app = Flask(__name__)
@@ -15,8 +16,10 @@ RPC_HOST = os.getenv('RPC_HOST', 'bitcoin-core')
 RPC_PORT = int(os.getenv('RPC_PORT', 18443))
 
 # Inicialização do cliente RPC
-def get_rpc_connection():
+def get_rpc_connection(wallet_name=None):
     url = f"http://{RPC_USER}:{RPC_PASSWORD}@{RPC_HOST}:{RPC_PORT}"
+    if wallet_name:
+        url += f"/wallet/{wallet_name}"
     return AuthServiceProxy(url)
 
 rpc = get_rpc_connection();
@@ -49,110 +52,158 @@ def get_block_by_number(block_number):
         return jsonify({"status": "success", "message": "Block retrieved successfully!", "block": block})
     except JSONRPCException as e:
         return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
+    
+# Funções utilitárias
+def ensure_wallet_exists(wallet_name="default_wallet"):
+    """
+    Garante que uma carteira exista no nó Bitcoin Core.
+    """
+    try:
+        rpc = get_rpc_connection()
+        wallets = rpc.listwallets()
+        if wallet_name not in wallets:
+            rpc.createwallet(wallet_name)
+            time.sleep(0.5)  # Aguarda para evitar problemas de bloqueio
+        else:
+            print(f"A carteira '{wallet_name}' já existe.")
+    except Exception as e:
+        print(f"Erro ao verificar ou criar carteira: {e}")
+        raise
+
+def create_random_wallet(prefix="copyright_plat_"):
+    """Cria uma nova carteira com um prefixo aleatório."""
+    random_suffix = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=8))
+    wallet_name = f"{prefix}{random_suffix}"
+    rpc = get_rpc_connection()
+    rpc.createwallet(wallet_name)
+    time.sleep(0.5)
+    return wallet_name
+
+def mine_blocks(address, num_blocks=21):
+    """Gera blocos para o endereço fornecido."""
+    rpc = get_rpc_connection()
+    return rpc.generatetoaddress(num_blocks, address)
+
 
 @app.route('/api/transaction/opreturn', methods=['POST'])
 def create_opreturn_transaction():
     """
-    Cria uma transação com OP_RETURN com base no conteúdo do arquivo enviado.
+    Inicia o processo de criação de uma transação OP_RETURN retornando o endereço de pagamento.
     """
     try:
-        file = request.files.get('file')
-        wallet_name = request.form.get('wallet_name', 'default_wallet')
-
-        if not file or not allowed_file(file.filename):
+        # Verifica se o JSON com o hash foi enviado
+        data = request.form.get('data')
+        if not data:
             return jsonify({
                 "status": "error",
-                "message": "Arquivo inválido! Permitidos: txt, pdf, doc, docx, jpg, jpeg, png, gif, mp3, wav, aac, ogg."
+                "message": "O campo 'data' com o hash do arquivo é obrigatório!"
             }), 400
 
-        data = file.read().hex()  # Converte o conteúdo do arquivo para hexadecimal
-
-        # Validar tamanho do OP_RETURN (máximo de 80 bytes)
-        if len(data) > 160:  # Cada byte é representado por 2 caracteres hexadecimais
+        # Valida o hash (deve ser uma string hexadecimal)
+        try:
+            bytes.fromhex(data)
+        except ValueError:
             return jsonify({
                 "status": "error",
-                "message": "Os dados do OP_RETURN excedem o limite de 80 bytes!"
+                "message": "O campo 'data' deve ser um hash hexadecimal válido!"
             }), 400
 
-        rpc = get_rpc_connection()
+        # Valida o tamanho do hash para o OP_RETURN (máximo de 80 bytes)
+        if len(data) > 160:
+            return jsonify({
+                "status": "error",
+                "message": "O hash excede o limite de 80 bytes para o OP_RETURN!"
+            }), 400
 
-        # Garante que a carteira está carregada
-        if wallet_name not in rpc.listwallets():
-            rpc.loadwallet(wallet_name)
+        # Cria uma nova carteira aleatória
+        wallet_name = create_random_wallet()
+        rpc = get_rpc_connection(wallet_name)
 
-        # Obter UTXOs disponíveis
-        utxos = rpc.listunspent(1)  # Confirmação mínima de 1 bloco
+        # Gera um novo endereço para a carteira
+        address = rpc.getnewaddress()
+
+        # Retorna o endereço para pagamento
+        return jsonify({
+            "status": "pending_payment",
+            "message": "Endereço gerado com sucesso. Envie o pagamento para registrar o hash.",
+            "wallet_name": wallet_name,
+            "address": address
+        })
+
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f'Erro RPC: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f'Erro inesperado: {str(e)}'}), 500
+
+@app.route('/api/transaction/opreturn/confirm', methods=['POST'])
+def confirm_opreturn_transaction():
+    """
+    Confirma o pagamento e registra o hash no OP_RETURN.
+    """
+    try:
+        wallet_name = request.json.get('wallet_name')
+        data = request.json.get('data')
+
+        if not wallet_name or not data:
+            return jsonify({
+                "status": "error",
+                "message": "Os campos 'wallet_name' e 'data' são obrigatórios."
+            }), 400
+
+        rpc = get_rpc_connection(wallet_name)
+
+        # Verifica se há saldo suficiente na carteira
+        balance = get_wallet_balance(wallet_name)
+        if balance <= 0:
+            return jsonify({
+                "status": "error",
+                "message": "Nenhum pagamento detectado na carteira."
+            }), 400
+
+        # Obtém UTXOs disponíveis
+        utxos = rpc.listunspent(1)
+        utxos = [utxo for utxo in utxos if utxo['spendable']]
+
         if not utxos:
-            return jsonify({"status": "error", "message": "Sem fundos disponíveis na carteira!"}), 400
+            return jsonify({
+                "status": "error",
+                "message": "Sem fundos disponíveis para criar a transação."
+            }), 400
 
-        # Selecionar o primeiro UTXO disponível
+        # Seleciona o primeiro UTXO disponível
         utxo = utxos[0]
         txid = utxo['txid']
         vout = utxo['vout']
         amount = utxo['amount']
 
-        # Calcular mudança (subtraindo taxa de transação mínima)
+        # Calcula a mudança (subtraindo a taxa de transação mínima)
         change_address = rpc.getrawchangeaddress()
-        fee = Decimal('0.0001')  # Taxa mínima para regtest
+        fee = Decimal('0.0001')
         change_amount = Decimal(amount) - fee
 
         if change_amount <= 0:
             return jsonify({"status": "error", "message": "Fundos insuficientes para cobrir a taxa de transação!"}), 400
 
-        print(f"Endereço de mudança: {change_address}")
-        print(f"OP_RETURN data: {data}")
-
-        # Criar transação com OP_RETURN
+        # Cria a transação com OP_RETURN
         outputs = [
             {"txid": txid, "vout": vout},
         ]
         destinations = {
-            "data": data,  # OP_RETURN
-            change_address: float(change_amount)  # Mudança
+            "data": data,
+            change_address: float(change_amount)
         }
 
-        # Criar, assinar e enviar a transação
+        # Cria, assina e envia a transação
         raw_tx = rpc.createrawtransaction(outputs, destinations)
         signed_tx = rpc.signrawtransactionwithwallet(raw_tx)
         sent_txid = rpc.sendrawtransaction(signed_tx['hex'])
 
         return jsonify({
             "status": "success",
-            "message": "Transação criada e enviada com sucesso!",
+            "message": "Hash registrado com sucesso no OP_RETURN!",
             "txid": sent_txid
         })
-    except JSONRPCException as e:
-        return jsonify({"status": "error", "message": f'Erro RPC: {str(e)}'}), 400
-    except Exception as e:
-        return jsonify({"status": "error", "message": f'Erro inesperado: {str(e)}'}), 500
 
-
-@app.route('/api/transaction/opreturn/<string:txid>', methods=['GET'])
-def get_opreturn_transaction(txid):
-    """
-    Consulta os dados do OP_RETURN de uma transação.
-    """
-    try:
-        rpc = get_rpc_connection()
-        raw_tx = rpc.getrawtransaction(txid, True)
-        vouts = raw_tx.get('vout', [])
-        op_return_data = None
-
-        # Buscar saída OP_RETURN
-        for vout in vouts:
-            script_pubkey = vout.get('scriptPubKey', {})
-            if script_pubkey.get('asm', '').startswith('OP_RETURN'):
-                op_return_data = script_pubkey.get('hex', None)
-                break
-
-        if not op_return_data:
-            return jsonify({"status": "error", "message": "Nenhuma saída OP_RETURN encontrada na transação."}), 404
-
-        return jsonify({
-            "status": "success",
-            "message": "Dados OP_RETURN recuperados com sucesso!",
-            "op_return_data": op_return_data
-        })
     except JSONRPCException as e:
         return jsonify({"status": "error", "message": f'Erro RPC: {str(e)}'}), 400
     except Exception as e:
@@ -237,10 +288,15 @@ def is_valid_address(address):
     # Exemplo básico: verificar comprimento e caracteres válidos
     return len(address) >= 25  # Ajuste conforme necessário
 
+def get_wallet_balance_name(wallet_name):
+    """Obtém o saldo da carteira."""
+    rpc = get_rpc_connection(wallet_name)
+    return rpc.getbalance()
 
-@app.route('/api/wallet/balance/', defaults={'address': None})
+@app.route('/api/wallet/balance/', defaults={'address': None, 'walle_name': None})
+@app.route('/api/wallet/balance/<string:wallet_name>')
 @app.route('/api/wallet/balance/<string:address>')
-def get_wallet_balance(address):
+def get_wallet_balance(address, wallet_name=''):
     
     if address:
         
@@ -264,6 +320,22 @@ def get_wallet_balance(address):
             return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
         except Exception as e:
             return jsonify({"status": "error", "message": f'Unexpected error: {str(e)}'}), 500
+        
+    elif wallet_name:   
+        
+        try:
+            
+            balance = get_wallet_balance_name(wallet_name)
+            return jsonify({
+                "status": "success",
+                "message": "Wallet balance retrieved successfully!",
+                "wallet_name": wallet_name,
+                "balance": balance
+            })
+        except JSONRPCException as e:
+            return jsonify({"status": "error", "message": f'Erro RPC: {str(e)}'}), 400
+        except Exception as e:
+            return jsonify({"status": "error", "message": f'Erro inesperado: {str(e)}'}), 500
         
     else:
         
@@ -315,19 +387,6 @@ def get_wallet_details(wallet_name):
         return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
 
 
-def ensure_wallet_exists(wallet_name="default_wallet"):
-    """Garante que uma carteira exista no nó bitcoin-core."""
-    try:
-        wallets = rpc.listwallets()
-        if wallet_name not in wallets:
-            print(f"Criando carteira '{wallet_name}'...")
-            rpc.createwallet(wallet_name, False)
-        else:
-            print(f"A carteira '{wallet_name}' já existe.")
-    except Exception as e:
-        print(f"Erro ao verificar ou criar carteira: {e}")
-        raise
-
 def get_new_address():
     """Solicita um novo endereço ao bitcoin-core."""
     try:
@@ -368,24 +427,9 @@ if __name__ == '__main__':
 
     print("Sistema inicializado com sucesso!")
 
-    # Manter o servidor ativo
-    # while True:
-    #     try:
-    #         time.sleep(10)
-    #     except KeyboardInterrupt:
-    #         print("Servidor encerrado.")
-    #         break
-
+if __name__ == '__main__':    
     app.run(debug=True, host='0.0.0.0', port=5000)
 
-# if __name__ == '__main__':
-#     print("Inicializando o sistema...")
-#     wallet = initialize_wallet()
 
-#     if rpc.getblockchaininfo()["chain"] == "regtest":
-#         print("Rede regtest detectada. Gerando blocos para ativação...")
-#         generate_blocks(wallet)
-
-#     print("Sistema inicializado com sucesso!")
 
 
