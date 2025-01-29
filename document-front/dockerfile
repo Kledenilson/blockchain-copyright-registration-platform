@@ -1,0 +1,21 @@
+# Usa a imagem oficial do Node.js
+FROM node:18
+
+WORKDIR /app
+
+# Copia os arquivos e instala dependências
+COPY package.json ./
+COPY package-lock.json ./
+RUN npm install
+
+RUN npm install -D tailwindcss postcss autoprefixer
+RUN npx tailwindcss init -p
+
+# Copia o restante do projeto
+COPY . .
+
+# Expõe a porta do Next.js
+EXPOSE 3000
+
+# Inicia o servidor Next.js
+CMD ["npm", "run", "dev"]

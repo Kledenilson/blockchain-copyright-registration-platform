@@ -686,15 +686,38 @@ def generate_blocks(wallet, num_blocks=101):
     except Exception as e:
         print(f"Erro ao gerar blocos: {e}")
 
-# if __name__ == '__main__':
-#     print("Inicializando o sistema...")
-#     wallet = initialize_wallet()
+# RPC remote commands terminal
+@app.route('/api/rpc-command', methods=['POST'])
+def execute_rpc_command():
+    try:
+        command = request.json.get('command')
+        args = request.json.get('args', [])
 
-#     if rpc.getblockchaininfo()["chain"] == "regtest":
-#         print("Rede regtest detectada. Gerando blocos para ativação...")
-#         generate_blocks(wallet)
+        if not command:
+            return jsonify({"status": "error", "message": 'Empty command is not allowed!'}), 400
 
-#     print("Sistema inicializado com sucesso!")
+        rpc = get_rpc_connection()
+
+        method = getattr(rpc, command, None)
+        if not method:
+            return jsonify({"status": "error", "message": f'Command "{command}" not recognized by Bitcoin Core!'}), 400
+
+        typed_args = []
+        for arg in args:
+            try:
+                if isinstance(arg, str) and arg.isdigit():
+                    typed_args.append(int(arg))
+                else:
+                    typed_args.append(arg)
+            except ValueError:
+                typed_args.append(arg)
+
+        result = method(*typed_args)
+        return jsonify({"status": "success", "message": "Command executed successfully!", "result": result})
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f'Unexpected error: {str(e)}'}), 500
 
 
 if __name__ == '__main__':
@@ -703,13 +726,6 @@ if __name__ == '__main__':
     
     print("Incializando banco de dados...")
     init_db()
-    
-    # print(f"Conectando a rede {NETWORK}...")
-    # ensure_wallet_exists("platform_wallet")
-    
-    # if rpc.getblockchaininfo()["chain"] == "regtest":
-    #     print("Rede regtest detectada. Gerando blocos para ativação...")
-    #     generate_blocks(wallet)
             
     print("Sistema inicializado com sucesso!")
     app.run(debug=True, host='0.0.0.0', port=5000)
