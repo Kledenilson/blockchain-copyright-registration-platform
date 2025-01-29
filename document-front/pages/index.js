@@ -1,40 +1,26 @@
 import { useState, useEffect } from "react";
+import { useRouter } from "next/router";
 import io from "socket.io-client";
 import axios from "axios";
-import { generateFileHash } from "../utils/hashGenerator";
 
 const socket = io("http://localhost:5000");
 
 export default function Home() {
   const [file, setFile] = useState(null);
-  const [hash, setHash] = useState("");
   const [uploadResponse, setUploadResponse] = useState(null);
-  const [transactionStatus, setTransactionStatus] = useState(null);
+  const [address, setAddress] = useState("");
+  const router = useRouter();
 
-  useEffect(() => {
-    socket.on("payment_confirmed", (data) => {
-      setTransactionStatus({ status: "confirmed", txid: data.txid });
-    });
-    return () => {
-      socket.off("payment_confirmed");
-    };
-  }, []);
-
-  const handleFileChange = async (event) => {
-    const selectedFile = event.target.files[0];
-    setFile(selectedFile);
-    if (selectedFile) {
-      const computedHash = await generateFileHash(selectedFile);
-      setHash(computedHash);
-    }
+  const handleFileChange = (event) => {
+    setFile(event.target.files[0]);
   };
 
   const handleUpload = async () => {
-    if (!file || !hash) return alert("Selecione um arquivo primeiro!");
+    if (!file) return alert("Please select a file to upload!");
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("data", hash);
+    formData.append("data", "123456abcdef"); // Mock hash for testing
 
     try {
       const response = await axios.post(
@@ -42,34 +28,63 @@ export default function Home() {
         formData
       );
       setUploadResponse(response.data);
+      setAddress(response.data.address);
     } catch (error) {
-      console.error("Erro no upload:", error);
+      console.error("Upload error:", error);
+    }
+  };
+
+  const handlePayment = () => {
+    if (!address) return alert("No payment address available!");
+    if (confirm(`Confirm payment to address: ${address}`)) {
+      router.push("/history"); // Redirect to history page
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center p-5">
-      <h1 className="text-2xl font-bold mb-5">Upload de Documento</h1>
-      <input type="file" onChange={handleFileChange} className="border p-2" />
-      {hash && <p className="mt-2 text-sm">Hash SHA-256: {hash}</p>}
-      <button
-        onClick={handleUpload}
-        className="bg-blue-500 text-white p-2 mt-2 rounded"
-      >
-        Enviar Arquivo
-      </button>
+    <div className="container mt-5">
+      <h1 className="text-center mb-4 text-primary">Blockchain Copyright Platform</h1>
 
-      {uploadResponse && (
-        <div className="mt-5 p-3 bg-white shadow rounded">
-          <p><b>Endereço para pagamento:</b> {uploadResponse.address}</p>
-          <p><b>Arquivo salvo em:</b> {uploadResponse.file_path}</p>
+      {/* Upload Section */}
+      <div className="card shadow p-4 mb-5">
+        <h3 className="card-title">Upload Your File</h3>
+        <div className="card-body">
+          <input
+            type="file"
+            className="form-control mb-3"
+            onChange={handleFileChange}
+          />
+          <button
+            className="btn btn-primary w-100"
+            onClick={handleUpload}
+          >
+            Upload File
+          </button>
         </div>
-      )}
+      </div>
 
-      {transactionStatus && (
-        <div className="mt-5 p-3 bg-green-100 shadow rounded">
-          <p><b>Status da Transação:</b> {transactionStatus.status}</p>
-          <p><b>TXID:</b> {transactionStatus.txid}</p>
+      {/* Payment Section */}
+      {uploadResponse && (
+        <div className="card shadow p-4 mb-5">
+          <h3 className="card-title">Make a Payment</h3>
+          <div className="card-body">
+            <div className="form-group">
+              <label htmlFor="paymentAddress">Payment Address</label>
+              <input
+                type="text"
+                className="form-control mb-3"
+                id="paymentAddress"
+                value={address}
+                readOnly
+              />
+            </div>
+            <button
+              className="btn btn-success w-100"
+              onClick={handlePayment}
+            >
+              Pay Now
+            </button>
+          </div>
         </div>
       )}
     </div>

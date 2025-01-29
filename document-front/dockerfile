@@ -6,10 +6,12 @@ WORKDIR /app
 # Copia os arquivos e instala dependências
 COPY package.json ./
 COPY package-lock.json ./
-RUN npm install
 
-RUN npm install -D tailwindcss postcss autoprefixer
-RUN npx tailwindcss init -p
+RUN rm -rf package-lock.json
+
+RUN npm install
+RUN npm install yarn
+RUN yarn add bootstrap
 
 # Copia o restante do projeto
 COPY . .
@@ -18,4 +20,4 @@ COPY . .
 EXPOSE 3000
 
 # Inicia o servidor Next.js
-CMD ["npm", "run", "dev"]
+CMD ["yarn", "dev"]

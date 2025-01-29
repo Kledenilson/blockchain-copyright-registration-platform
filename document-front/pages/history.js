@@ -7,21 +7,23 @@ const socket = io("http://localhost:5000");
 export default function History() {
   const [transactions, setTransactions] = useState([]);
 
+  // Função para buscar transações da API
   const fetchTransactions = async () => {
     try {
       const response = await axios.get("http://localhost:5000/api/transactions");
       setTransactions(response.data.transactions);
     } catch (error) {
-      console.error("Erro ao buscar transações:", error);
+      console.error("Error fetching transactions:", error);
     }
   };
 
+  // Atualiza transações em tempo real via WebSocket
   useEffect(() => {
     fetchTransactions();
-    
+
     socket.on("payment_confirmed", (data) => {
-      console.log("Nova transação confirmada:", data);
-      fetchTransactions();
+      console.log("New transaction confirmed:", data);
+      fetchTransactions(); // Atualiza a lista em tempo real
     });
 
     return () => {
@@ -30,22 +32,44 @@ export default function History() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center p-5">
-      <h1 className="text-2xl font-bold mb-5">Histórico de Transações</h1>
-      <div className="bg-white shadow-lg rounded p-6 w-full max-w-3xl">
-        {transactions.length === 0 ? (
-          <p className="text-center text-gray-600">Nenhuma transação encontrada.</p>
-        ) : (
-          <ul>
-            {transactions.map((tx) => (
-              <li key={tx.txid} className="p-4 border-b last:border-none">
-                <p><b>TXID:</b> {tx.txid}</p>
-                <p><b>Status:</b> {tx.status}</p>
-                <p><b>Data:</b> {new Date(tx.timestamp).toLocaleString()}</p>
-              </li>
-            ))}
-          </ul>
-        )}
+    <div className="container mt-5">
+      <h1 className="text-center mb-4 text-primary">Transaction History</h1>
+      <div className="card shadow p-4">
+        <h3 className="card-title">Recent Transactions</h3>
+        <div className="card-body">
+          {transactions.length === 0 ? (
+            <p className="text-center text-muted">No transactions found.</p>
+          ) : (
+            <table className="table table-striped">
+              <thead>
+                <tr>
+                  <th>TXID</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((tx) => (
+                  <tr key={tx.txid}>
+                    <td>{tx.txid}</td>
+                    <td>
+                      <span
+                        className={`badge ${
+                          tx.status === "confirmed"
+                            ? "bg-success"
+                            : "bg-warning text-dark"
+                        }`}
+                      >
+                        {tx.status}
+                      </span>
+                    </td>
+                    <td>{new Date(tx.timestamp).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );

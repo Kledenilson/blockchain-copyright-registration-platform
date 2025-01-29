@@ -2,7 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-/* PersonalizaÃ§Ãµes adicionais */
+/* Personalizações adicionais */
 body {
-  @apply bg-gray-100 text-gray-800;
+  font-family: Arial, sans-serif;
+  background-color: #f3f4f6;
 }
