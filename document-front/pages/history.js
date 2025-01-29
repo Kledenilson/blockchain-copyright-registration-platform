@@ -10,7 +10,7 @@ export default function History() {
   // Função para buscar transações da API
   const fetchTransactions = async () => {
     try {
-      const response = await axios.get("http://localhost:5000/api/transactions");
+      const response = await axios.get("http://localhost:5000/api/transactions/list");      
       setTransactions(response.data.transactions);
     } catch (error) {
       console.error("Error fetching transactions:", error);
@@ -44,6 +44,7 @@ export default function History() {
               <thead>
                 <tr>
                   <th>TXID</th>
+                  <th>Address</th>
                   <th>Status</th>
                   <th>Date</th>
                 </tr>
@@ -52,18 +53,26 @@ export default function History() {
                 {transactions.map((tx) => (
                   <tr key={tx.txid}>
                     <td>{tx.txid}</td>
+                    <td>{tx.address}</td>
                     <td>
                       <span
                         className={`badge ${
-                          tx.status === "confirmed"
+                          transactions.status === "confirmed"
                             ? "bg-success"
                             : "bg-warning text-dark"
                         }`}
                       >
-                        {tx.status}
+                        {transactions.status}
                       </span>
                     </td>
-                    <td>{new Date(tx.timestamp).toLocaleString()}</td>
+                    <td>{new Date(tx.time).toLocaleString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          second: "2-digit",
+                        })}</td>
                   </tr>
                 ))}
               </tbody>
