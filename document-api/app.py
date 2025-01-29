@@ -2,9 +2,9 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from bitcoinrpc.authproxy import AuthServiceProxy, JSONRPCException
 from bitcoin.rpc import RawProxy
-import os
-import time, random
+import os, time, random, sqlite3
 from decimal import Decimal
+from threading import Thread
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -14,6 +14,7 @@ RPC_USER = os.getenv('RPC_USER', 'myuser')
 RPC_PASSWORD = os.getenv('RPC_PASSWORD', 'mypassword')
 RPC_HOST = os.getenv('RPC_HOST', 'bitcoin-core')
 RPC_PORT = int(os.getenv('RPC_PORT', 18443))
+NETWORK = os.getenv('NETWORK', 'regtest')  # Alterna entre regtest e testnet
 
 # Inicialização do cliente RPC
 def get_rpc_connection(wallet_name=None):
@@ -23,6 +24,41 @@ def get_rpc_connection(wallet_name=None):
     return AuthServiceProxy(url)
 
 rpc = get_rpc_connection();
+
+# Diretório base para armazenar o banco de dados e uploads
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DB_PATH = os.path.join(BASE_DIR, "data", "transactions.db")
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+
+# Garante que as pastas existem
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+# Conexão SQLite persistente
+def get_db_connection():
+    return sqlite3.connect(DB_PATH)
+
+# Banco de Dados SQLite
+def init_db():
+    conn = sqlite3.connect("data/transactions.db")
+    cursor = conn.cursor()
+
+    # Criação da tabela de transações
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_address TEXT,
+            hash TEXT,
+            txid TEXT,
+            status TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
 
 ALLOWED_EXTENSIONS = {
     'txt', 'pdf', 'doc', 'docx',  # Documentos
@@ -54,21 +90,54 @@ def get_block_by_number(block_number):
         return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
     
 # Funções utilitárias
-def ensure_wallet_exists(wallet_name="default_wallet"):
-    """
-    Garante que uma carteira exista no nó Bitcoin Core.
-    """
+def ensure_wallet_exists(wallet_name="platform_wallet"):
+    """Garante que uma carteira exista no nó Bitcoin Core."""
     try:
         rpc = get_rpc_connection()
         wallets = rpc.listwallets()
-        if wallet_name not in wallets:
-            rpc.createwallet(wallet_name)
-            time.sleep(0.5)  # Aguarda para evitar problemas de bloqueio
+
+        if wallet_name in wallets:
+            print(f"A carteira '{wallet_name}' já está carregada.")
         else:
-            print(f"A carteira '{wallet_name}' já existe.")
+            print(f"Criando ou carregando a carteira '{wallet_name}'...")
+            try:
+                rpc.createwallet(wallet_name)
+                print(f"Carteira '{wallet_name}' criada com sucesso.")
+            except JSONRPCException as e:
+                if "Wallet file verification failed" in str(e):
+                    print(f"Erro ao criar carteira: {e}. Tentando carregar...")
+                    rpc.loadwallet(wallet_name)
+                else:
+                    raise
     except Exception as e:
         print(f"Erro ao verificar ou criar carteira: {e}")
         raise
+def monitor_transactions():
+    """Monitora transações no blockchain e atualiza o status no banco de dados."""
+    rpc = get_rpc_connection()
+    while True:
+        time.sleep(10)  # Intervalo entre verificações
+        try:
+            conn = sqlite3.connect("transactions.db")
+            cursor = conn.cursor()
+
+            # Busca transações pendentes no banco
+            cursor.execute("SELECT id, txid FROM transactions WHERE status = 'pending'")
+            pending_transactions = cursor.fetchall()
+
+            for tx_id, txid in pending_transactions:
+                transaction = rpc.gettransaction(txid)
+                confirmations = transaction.get("confirmations", 0)
+
+                if confirmations >= 1:
+                    # Atualiza o status para confirmado
+                    cursor.execute("UPDATE transactions SET status = 'confirmed' WHERE id = ?", (tx_id,))
+                    conn.commit()
+
+            conn.close()
+        except Exception as e:
+            print(f"Erro ao monitorar transações: {e}")
+
 
 def create_random_wallet(prefix="copyright_plat_"):
     """Cria uma nova carteira com um prefixo aleatório."""
@@ -83,6 +152,100 @@ def mine_blocks(address, num_blocks=21):
     """Gera blocos para o endereço fornecido."""
     rpc = get_rpc_connection()
     return rpc.generatetoaddress(num_blocks, address)
+
+def initialize_wallet():
+    """Inicializa a carteira padrão e gera blocos iniciais se necessário."""
+    print("Verificando ou criando uma nova carteira...")
+    ensure_wallet_exists()
+
+    rpc = get_rpc_connection("platform_wallet")
+    address = rpc.getnewaddress()
+    print(f"Endereço gerado pelo nó (regtest): {address}")
+
+    if rpc.getblockchaininfo()["chain"] == "regtest":
+        print("Rede regtest detectada. Gerando blocos para ativação...")
+        block_hashes = rpc.generatetoaddress(101, address)
+        print(f"Blocos gerados: {len(block_hashes)}")
+        print(f"Primeiro bloco: {block_hashes[0]}")
+
+    return {
+        'address': address
+    }
+    
+@app.route('/api/transaction/upload', methods=['POST'])
+def upload_transaction():
+    """
+    Recebe o upload do cliente e registra o hash no banco.
+    """
+    try:
+        file = request.files.get('file')
+        if not file:
+            return jsonify({"status": "error", "message": "Arquivo não enviado."}), 400
+
+        data = request.form.get('data')
+        if not data:
+            return jsonify({"status": "error", "message": "Hash do arquivo é obrigatório."}), 400
+
+        # Valida o hash
+        try:
+            bytes.fromhex(data)
+        except ValueError:
+            return jsonify({"status": "error", "message": "Hash inválido."}), 400
+
+        # Salva o arquivo
+        file_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
+        file.save(file_path)
+
+        # Gera endereço para pagamento
+        wallet_name = "platform_wallet"
+        rpc = get_rpc_connection(wallet_name)
+        address = rpc.getnewaddress()
+
+        # Salva no banco de dados
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO transactions (client_address, hash, status) VALUES (?, ?, ?)",
+            (address, data, "pending")
+        )
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            "status": "success",
+            "message": "Upload recebido. Aguarde confirmação de pagamento.",
+            "address": address,
+            "file_path": file_path  # Retorna o caminho do arquivo salvo
+        })
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Erro inesperado: {str(e)}"}), 500
+
+
+@app.route('/api/transaction/confirm/<string:txid>', methods=['GET'])
+def confirm_transaction(txid):
+    """
+    Verifica o status de uma transação específica.
+    """
+    try:
+        conn = sqlite3.connect("transactions.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT status FROM transactions WHERE txid = ?", (txid,))
+        result = cursor.fetchone()
+        conn.close()
+
+        if result:
+            return jsonify({
+                "status": "success",
+                "message": "Status da transação recuperado com sucesso.",
+                "txid": txid,
+                "transaction_status": result[0]
+            })
+        else:
+            return jsonify({"status": "error", "message": "Transação não encontrada."}), 404
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Erro inesperado: {str(e)}"}), 500
 
 
 @app.route('/api/transaction/opreturn', methods=['POST'])
@@ -212,18 +375,70 @@ def confirm_opreturn_transaction():
 
 @app.route('/api/transaction/send', methods=['POST'])
 def send_transaction():
+    """
+    Envia uma transação da carteira da plataforma para o endereço fornecido.
+    """
     try:
-        address = request.json.get('address')
-        amount = request.json.get('amount')
+        print("📌 Iniciando envio de transação pela API...")
 
-        if not address or not amount:
-            return jsonify({"status": "error", "message": '"address" and "amount" parameters are required!'}), 400
+        # Obtém os dados da requisição
+        data = request.get_json()
+        address = data.get("address")
+        amount = data.get("amount")
 
-        rpc = get_rpc_connection()
-        txid = rpc.sendtoaddress(address, amount)
-        return jsonify({"status": "success", "message": "Transaction sent successfully!", "txid": txid})
+        print(f"📌 Dados recebidos: endereço={address}, valor={amount}")
+
+        # Valida os parâmetros
+        if not address:
+            return jsonify({"status": "error", "message": "O endereço é obrigatório."}), 400
+        if not amount or not isinstance(amount, (int, float)):
+            return jsonify({"status": "error", "message": "O valor deve ser numérico e maior que zero."}), 400
+
+        # Define a carteira usada para a transação
+        wallet_name = "platform_wallet"
+
+        # Certifique-se de que a carteira está carregada
+        rpc_admin = get_rpc_connection()
+        wallets = rpc_admin.listwallets()
+        if wallet_name not in wallets:
+            print(f"⚠️ A carteira {wallet_name} não está carregada. Tentando carregar...")
+            rpc_admin.loadwallet(wallet_name)
+
+        # Conecta ao RPC com a carteira correta
+        rpc = get_rpc_connection(wallet_name)
+        print(f"📌 Conexão RPC estabelecida com a carteira {wallet_name}.")
+
+        # Verifica saldo antes de enviar
+        balance = rpc.getbalance()
+        print(f"📌 Saldo disponível na carteira {wallet_name}: {balance} BTC.")
+
+        if balance < amount:
+            return jsonify({
+                "status": "error",
+                "message": f"Saldo insuficiente. Saldo disponível: {balance} BTC."
+            }), 400
+
+        # Garante que a taxa está definida corretamente
+        rpc.settxfee(0.0001)
+        print(f"📌 Taxa de transação definida como 0.0001 BTC.")
+
+        # Envia a transação
+        print(f"📌 Enviando {amount} BTC para {address}...")
+        txid = rpc.sendtoaddress(address, float(amount))
+        print(f"✅ Transação enviada com sucesso! TXID: {txid}")
+
+        return jsonify({
+            "status": "success",
+            "message": "Transação enviada com sucesso!",
+            "txid": txid
+        })
+
     except JSONRPCException as e:
-        return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
+        print(f"⚠️ Erro RPC: {e}")
+        return jsonify({"status": "error", "message": f"RPC error: {str(e)}"}), 400
+    except Exception as e:
+        print(f"⚠️ Erro inesperado: {e}")
+        return jsonify({"status": "error", "message": f"Erro inesperado: {str(e)}"}), 500
     
     
 @app.route('/api/transaction/<string:txid>', methods=['GET'])
@@ -293,39 +508,13 @@ def get_wallet_balance_name(wallet_name):
     rpc = get_rpc_connection(wallet_name)
     return rpc.getbalance()
 
-@app.route('/api/wallet/balance/', defaults={'address': None, 'walle_name': None})
-@app.route('/api/wallet/balance/<string:wallet_name>')
-@app.route('/api/wallet/balance/<string:address>')
-def get_wallet_balance(address, wallet_name=''):
+@app.route('/api/wallet/balance/name/<string:wallet_name>')
+def get_wallet_balance_name(wallet_name):
     
-    if address:
+    if wallet_name:
         
-        try:
-            rpc = get_rpc_connection()
-            
-            # Verifica se o endereço é válido (implemente sua lógica de validação)
-            if not is_valid_address(address):  # Você precisa criar esta função
-                return jsonify({"status": "error", "message": "Invalid wallet address"}), 400
-                
-            # Obtém o saldo usando o endereço (ajuste para o método correto da sua RPC)
-            balance = rpc.getreceivedbyaddress(address)  # Método comum em muitas implementações RPC
-            
-            return jsonify({
-                "status": "success",
-                "message": "Wallet balance retrieved successfully!",
-                "address": address,
-                "balance": balance
-            })
-        except JSONRPCException as e:
-            return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
-        except Exception as e:
-            return jsonify({"status": "error", "message": f'Unexpected error: {str(e)}'}), 500
-        
-    elif wallet_name:   
-        
-        try:
-            
-            balance = get_wallet_balance_name(wallet_name)
+        try:            
+            balance = get_wallet_balance_name(wallet_name)      
             return jsonify({
                 "status": "success",
                 "message": "Wallet balance retrieved successfully!",
@@ -336,30 +525,99 @@ def get_wallet_balance(address, wallet_name=''):
             return jsonify({"status": "error", "message": f'Erro RPC: {str(e)}'}), 400
         except Exception as e:
             return jsonify({"status": "error", "message": f'Erro inesperado: {str(e)}'}), 500
+    
+@app.route('/api/wallet/balance/all')
+def get_wallet_balance_load():
+    
+    try:
+        rpc = get_rpc_connection()
         
-    else:
+        # Obtém o saldo total da carteira carregada
+        balance = rpc.getbalance()
         
-        try:
+        # Opcional: obter informações adicionais
+        unconfirmed = rpc.getunconfirmedbalance()  # Se suportado
+        # transactions = rpc.listtransactions("*", 10)  # Últimas 10 transações
+        
+        return jsonify({
+            "status": "success",
+            "message": "Current wallet balance retrieved successfully!",
+            "balance": balance,
+            "unconfirmed": unconfirmed,
+            # "recent_transactions": transactions
+        })
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f'Unexpected error: {str(e)}'}), 500  
+
+@app.route('/api/wallet/balance/address/<string:address>')
+def get_wallet_balance_by_address(address):
+    
+    try:
+        
+        if address:
             rpc = get_rpc_connection()
-            
-            # Obtém o saldo total da carteira carregada
-            balance = rpc.getbalance()
-            
-            # Opcional: obter informações adicionais
-            unconfirmed = rpc.getunconfirmedbalance()  # Se suportado
-            # transactions = rpc.listtransactions("*", 10)  # Últimas 10 transações
-            
+            balance = rpc.getreceivedbyaddress(address)
             return jsonify({
                 "status": "success",
-                "message": "Current wallet balance retrieved successfully!",
-                "balance": balance,
-                "unconfirmed": unconfirmed,
-                # "recent_transactions": transactions
+                "message": "Saldo recuperado com sucesso!",
+                "address": address,
+                "balance": balance
             })
-        except JSONRPCException as e:
-            return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
-        except Exception as e:
-            return jsonify({"status": "error", "message": f'Unexpected error: {str(e)}'}), 500    
+
+        return jsonify({
+            "status": "error",
+            "message": "É necessário fornecer 'wallet_name' ou 'address'."
+        }), 400
+        
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f'Erro RPC: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f'Erro inesperado: {str(e)}'}), 500      
+        
+
+@app.route('/api/wallet/balance', defaults={'identifier': None}, methods=['GET'])
+@app.route('/api/wallet/balance/<string:identifier>', methods=['GET'])
+def get_wallet_balance(identifier):
+    """
+    Obtém o saldo de uma carteira específica pelo nome ou endereço.
+    """
+    try:
+        # Verifica se o identificador foi passado como parâmetro na URL ou query string
+        wallet_name = identifier or request.args.get('wallet_name')
+        address = request.args.get('address')
+
+        if wallet_name:
+            rpc = get_rpc_connection(wallet_name)
+            balance = rpc.getbalance()
+            return jsonify({
+                "status": "success",
+                "message": "Saldo recuperado com sucesso!",
+                "wallet_name": wallet_name,
+                "balance": balance
+            })
+
+        if address:
+            rpc = get_rpc_connection()
+            balance = rpc.getreceivedbyaddress(address)
+            return jsonify({
+                "status": "success",
+                "message": "Saldo recuperado com sucesso!",
+                "address": address,
+                "balance": balance
+            })
+
+        return jsonify({
+            "status": "error",
+            "message": "É necessário fornecer 'wallet_name' ou 'address'."
+        }), 400
+
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f'Erro RPC: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f'Erro inesperado: {str(e)}'}), 500
+            
     
 @app.route('/api/wallet/create', methods=['POST'])
 def create_wallet():
@@ -387,25 +645,36 @@ def get_wallet_details(wallet_name):
         return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
 
 
-def get_new_address():
-    """Solicita um novo endereço ao bitcoin-core."""
+def get_new_address(wallet_name="platform_wallet"):
+    """Solicita um novo endereço ao Bitcoin Core dentro do contexto de uma carteira."""
     try:
+        rpc = get_rpc_connection(wallet_name)  # Certifica-se de que a conexão usa a carteira correta
         address = rpc.getnewaddress()
         print(f"Endereço gerado pelo nó (regtest): {address}")
         return address
-    except Exception as e:
+    except JSONRPCException as e:
         print(f"Erro ao obter endereço do nó: {e}")
         raise
 
+
 def initialize_wallet():
-    """Inicializa a carteira, solicitando endereço ao nó."""
+    """Inicializa a carteira padrão e gera blocos iniciais se necessário."""
     print("Verificando ou criando uma nova carteira...")
-    ensure_wallet_exists()
-    address = get_new_address()
-    print("Carteira configurada com sucesso.")
-    return {
-        'address': address
-    }
+    
+    print(f"Conectando a rede {NETWORK}...")
+    ensure_wallet_exists("platform_wallet")
+
+    print("Carregando carteira padrão para obter um endereço...")
+    address = get_new_address("platform_wallet")  # Agora chamamos explicitamente a carteira correta   
+
+    if get_rpc_connection("platform_wallet").getblockchaininfo()["chain"] == "regtest":
+        print("Rede regtest detectada. Gerando blocos para ativação...")
+        block_hashes = get_rpc_connection("platform_wallet").generatetoaddress(101, address)
+        print(f"Blocos gerados: {len(block_hashes)}")
+        print(f"Primeiro bloco: {block_hashes[0]}")
+
+    return {'address': address}
+
 
 def generate_blocks(wallet, num_blocks=101):
     """Gera blocos para a rede regtest."""
@@ -417,17 +686,32 @@ def generate_blocks(wallet, num_blocks=101):
     except Exception as e:
         print(f"Erro ao gerar blocos: {e}")
 
+# if __name__ == '__main__':
+#     print("Inicializando o sistema...")
+#     wallet = initialize_wallet()
+
+#     if rpc.getblockchaininfo()["chain"] == "regtest":
+#         print("Rede regtest detectada. Gerando blocos para ativação...")
+#         generate_blocks(wallet)
+
+#     print("Sistema inicializado com sucesso!")
+
+
 if __name__ == '__main__':
     print("Inicializando o sistema...")
     wallet = initialize_wallet()
-
-    if rpc.getblockchaininfo()["chain"] == "regtest":
-        print("Rede regtest detectada. Gerando blocos para ativação...")
-        generate_blocks(wallet)
-
+    
+    print("Incializando banco de dados...")
+    init_db()
+    
+    # print(f"Conectando a rede {NETWORK}...")
+    # ensure_wallet_exists("platform_wallet")
+    
+    # if rpc.getblockchaininfo()["chain"] == "regtest":
+    #     print("Rede regtest detectada. Gerando blocos para ativação...")
+    #     generate_blocks(wallet)
+            
     print("Sistema inicializado com sucesso!")
-
-if __name__ == '__main__':    
     app.run(debug=True, host='0.0.0.0', port=5000)
 
 

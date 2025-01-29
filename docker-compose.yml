@@ -30,8 +30,8 @@ services:
       - "5000:5000"
     volumes:
       - ./document-api:/app
-      - ./uploads:/app/uploads
-      - ./document-data:/data
+      - ./document-api/uploads:/app/uploads
+      - ./document-api/data:/data
     depends_on:
       - bitcoin-core
 
