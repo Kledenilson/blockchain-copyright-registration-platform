@@ -3,14 +3,14 @@ FROM node:18
 
 WORKDIR /app
 
-# Copia os arquivos e instala dependências
-COPY package.json ./
-COPY package-lock.json ./
-
 RUN rm -rf package-lock.json
 
-RUN npm install
-RUN npm install yarn
+# Copia os arquivos e instala dependências
+COPY package.json ./
+
+COPY package-lock.json ./
+
+RUN yarn install
 RUN yarn add bootstrap
 
 # Copia o restante do projeto

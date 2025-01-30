@@ -40,8 +40,9 @@ services:
     container_name: document-front
     ports:
       - "3001:3000"
-    environment:
-    - CHOKIDAR_USEPOLLING=true
+    environment:    
+      - CHOKIDAR_USEPOLLING=true # Necessário para monitorar alterações no Docker
+      - WATCHPACK_POLLING=true   # Adicional para Webpack no hot reload
     volumes:
       - ./document-front:/app
       - /app/node_modules

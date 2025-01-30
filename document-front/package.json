@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "Frontend Next.js para upload e monitoramento de transações Bitcoin",
     "scripts": {
-        "dev": "next dev",
+        "dev": "next dev -H 0.0.0.0",
         "build": "next build",
         "start": "next start"
     },
@@ -12,7 +12,11 @@
         "next": "^14.0.0",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
-        "socket.io-client": "^4.7.2"
+        "socket.io-client": "^4.7.2",
+        "i18next": "^23.3.0", 
+        "react-i18next": "^13.0.0",
+        "react-scripts": "5.0.1",
+        "styled-components": "^6.0.0"        
     },
     "devDependencies": {
         "autoprefixer": "^10.4.20",

@@ -5,9 +5,14 @@ from bitcoin.rpc import RawProxy
 import os, time, random, sqlite3
 from decimal import Decimal
 from threading import Thread
+from flask_socketio import SocketIO, emit
+from gevent import monkey
+monkey.patch_all()
+
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Configurações de rede e RPC
 RPC_USER = os.getenv('RPC_USER', 'myuser')
@@ -113,31 +118,52 @@ def ensure_wallet_exists(wallet_name="platform_wallet"):
         print(f"Erro ao verificar ou criar carteira: {e}")
         raise
 def monitor_transactions():
-    """Monitora transações no blockchain e atualiza o status no banco de dados."""
-    rpc = get_rpc_connection()
+    rpc = get_rpc_connection("platform_wallet")
     while True:
-        time.sleep(10)  # Intervalo entre verificações
+        time.sleep(10)
         try:
-            conn = sqlite3.connect("transactions.db")
+            conn = sqlite3.connect("data/transactions.db")
             cursor = conn.cursor()
 
-            # Busca transações pendentes no banco
             cursor.execute("SELECT id, txid FROM transactions WHERE status = 'pending'")
             pending_transactions = cursor.fetchall()
 
             for tx_id, txid in pending_transactions:
-                transaction = rpc.gettransaction(txid)
+                try:
+                    transaction = rpc.gettransaction(txid)
+                except Exception as e:
+                    print(f"Error fetching transaction {txid}: {e}")
+                    continue
+
                 confirmations = transaction.get("confirmations", 0)
 
                 if confirmations >= 1:
-                    # Atualiza o status para confirmado
+                    address = None
+                    amount = 0
+
+                    details = transaction.get("details", [])
+                    if details and isinstance(details, list):
+                        address = details[0].get("address", "unknown")
+                        amount = details[0].get("amount", 0)
+
+                    if not address:
+                        print(f"Warning: No valid address found for TXID {txid}")
+                        continue
+
                     cursor.execute("UPDATE transactions SET status = 'confirmed' WHERE id = ?", (tx_id,))
                     conn.commit()
+
+                    socketio.emit("payment_confirmed", {
+                        "txid": txid,
+                        "status": "confirmed",
+                        "time": transaction.get("blocktime", time.time()),
+                        "amount": amount,
+                        "address": address
+                    })
 
             conn.close()
         except Exception as e:
             print(f"Erro ao monitorar transações: {e}")
-
 
 def create_random_wallet(prefix="copyright_plat_"):
     """Cria uma nova carteira com um prefixo aleatório."""
@@ -171,6 +197,33 @@ def initialize_wallet():
     return {
         'address': address
     }
+    
+@app.route('/api/transactions/<address>', methods=['GET'])
+def get_transactions_by_address(address):
+    """
+    Retorna todas as transações associadas a um endereço específico.
+    """
+    try:
+        # Conecta ao Bitcoin Core com a carteira carregada
+        wallet_name = "platform_wallet"
+        rpc = get_rpc_connection(wallet_name)
+
+        # Lista as transações para o endereço
+        transactions = rpc.listreceivedbyaddress(0, True, True)
+
+        # Filtra as transações pelo endereço fornecido
+        address_transactions = [tx for tx in transactions if tx['address'] == address]
+
+        return jsonify({
+            "status": "success",
+            "address": address,
+            "transactions": address_transactions
+        })
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f"RPC error: {str(e)}"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Unexpected error: {str(e)}"}), 500
+
     
 @app.route('/api/transaction/upload', methods=['POST'])
 def upload_transaction():
@@ -720,15 +773,22 @@ def execute_rpc_command():
         return jsonify({"status": "error", "message": f'Unexpected error: {str(e)}'}), 500
 
 
+from gevent import monkey
+monkey.patch_all()
+
 if __name__ == '__main__':
     print("Inicializando o sistema...")
     wallet = initialize_wallet()
     
-    print("Incializando banco de dados...")
+    print("Inicializando banco de dados...")
     init_db()
-            
+    
+    print("Iniciando monitoramento de transações...")
+    Thread(target=monitor_transactions, daemon=True).start()
+    
     print("Sistema inicializado com sucesso!")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+
 
 
 
