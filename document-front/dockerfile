@@ -12,6 +12,7 @@ COPY package-lock.json ./
 
 RUN yarn install
 RUN yarn add bootstrap
+RUN yarn add react-icons
 
 # Copia o restante do projeto
 COPY . .

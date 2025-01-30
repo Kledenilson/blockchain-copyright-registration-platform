@@ -5,6 +5,7 @@ import { generateFileHash } from "../utils/hashGenerator";
 import Header from "../components/Header";
 import Toaster from "../components/Toaster";
 import io from "socket.io-client";
+import { BsUpload, BsCheckCircle } from "react-icons/bs"; // Importando o ícone de upload do React Icons
 
 const socket = io("http://localhost:5000");
 
@@ -21,7 +22,6 @@ export default function Home() {
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [txHash, setTxHash] = useState("");
   const [fileDownloadLink, setFileDownloadLink] = useState("");
-
   const router = useRouter();
 
   useEffect(() => {
@@ -33,7 +33,6 @@ export default function Home() {
         setShowDownloadModal(true);
       }
     });
-
     return () => {
       socket.off("payment_confirmed");
     };
@@ -48,7 +47,6 @@ export default function Home() {
   const handleFileChange = async (event) => {
     const selectedFile = event.target.files[0];
     setFile(selectedFile);
-
     if (selectedFile) {
       try {
         const computedHash = await generateFileHash(selectedFile);
@@ -65,11 +63,9 @@ export default function Home() {
       showToast("Select a file before uploading!", "error");
       return;
     }
-
     const formData = new FormData();
     formData.append("file", file);
     formData.append("data", hash);
-
     try {
       const response = await axios.post(
         "http://localhost:5000/api/transaction/upload",
@@ -90,7 +86,6 @@ export default function Home() {
       showToast("No payment address available!", "error");
       return;
     }
-
     try {
       const response = await axios.post(
         "http://localhost:5000/api/transaction/send",
@@ -116,7 +111,7 @@ export default function Home() {
   };
 
   return (
-    <div className="container mt-5">
+    <div className="container mt-12">
       <Header />
       <Toaster message={toastMessage} type={toastType} />
       <div className="container my-5">
@@ -130,39 +125,47 @@ export default function Home() {
               </p>
               <footer className="blockquote-footer" style={{ fontSize: "0.7em" }}>
                 You only need to donate a minimum of{" "}
-                <cite title="BTC Donation">0.01 BTC</cite>.
+                <cite title="BTC Donation">0.0001 BTC</cite>.
               </footer>
             </blockquote>
           </div>
         </div>
       </div>
-      <div className="card shadow p-4 mb-5">
-        <h4 className="card-title">Upload your file now</h4>
-        <div className="card-body">
-          <input
-            type="file"
-            className="form-control mb-3"
-            onChange={handleFileChange}
-          />
-          <button className="btn btn-primary w-100 mb-3" onClick={handleUpload}>
-            Upload file
-          </button>
+      <div className="row justify-content-center">
+        {/* Card de Upload */}
+        <div className="col-md-5 me-5">
+          <div className="card shadow p-4 mb-2">
+            <h4 className="card-title">Upload your file now</h4>
+            <div className="card-body">
+              <input
+                type="file"
+                className="form-control mb-5"
+                onChange={handleFileChange}
+              />
+              <button className="btn btn-primary w-100 mb-3" onClick={handleUpload}>
+                <BsUpload /> {/* Ícone de upload */}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div className="card shadow p-4 mb-5">
-        <h4 className="card-title">Validate record hashes here</h4>
-        <div className="card-body">
-          <input
-            type="text"
-            className="form-control mb-3"
-            placeholder="Paste the registration hash here"
-            value={searchAddress}
-            onChange={(e) => setSearchAddress(e.target.value)}
-          />
-          <button className="btn btn-secondary w-100" onClick={handleSearch}>
-            Check authenticity
-          </button>
+        {/* Card de Verificação */}
+        <div className="col-md-5">
+          <div className="card shadow p-4 mb-5">
+            <h4 className="card-title">Validate record hashes here</h4>
+            <div className="card-body">
+              <input
+                type="text"
+                className="form-control mb-5"
+                placeholder="Paste the registration hash here"
+                value={searchAddress}
+                onChange={(e) => setSearchAddress(e.target.value)}
+              />
+              <button className="btn btn-secondary w-100" onClick={handleSearch}>
+              <BsCheckCircle /> 
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
