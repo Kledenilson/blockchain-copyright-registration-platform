@@ -211,7 +211,7 @@ export default function Home() {
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">Make a Payment</h5>
+                <h5 className="modal-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>Make a Payment</h5>
                 <button
                   type="button"
                   className="btn-close"
@@ -220,7 +220,7 @@ export default function Home() {
               </div>
               <div className="modal-body">
                 <div className="form-group">
-                  <label htmlFor="paymentAddress">Payment to Wallet Address</label>
+                  <label htmlFor="paymentAddress"  style={{fontWeight: '600'}}>Payment to Wallet Address</label>
                   <input
                     type="text"
                     className="form-control mb-3"
@@ -230,7 +230,7 @@ export default function Home() {
                   />
                 </div>
                 <div className="form-group">
-                  <label htmlFor="paymentAmount">Amount (BTC)</label>
+                  <label htmlFor="paymentAmount" style={{fontWeight: '600'}}>Amount (BTC)</label>
                   <input
                     type="number"
                     className="form-control mb-3"
