@@ -48,7 +48,7 @@ export default function Home() {
   const showToast = (message, type = "success") => {
     setToastMessage(message);
     setToastType(type);
-    setTimeout(() => setToastMessage(null), 3000);
+    setTimeout(() => setToastMessage(null), 5000);
   };
 
   const handleFileChange = async (event) => {
@@ -101,7 +101,7 @@ export default function Home() {
           amount: amount,
         }
       );
-      showToast("Payment sent! Await confirmation...", "success");
+      showToast("Payment sent! Await confirmation... Track you registration.", "success");
       setShowPaymentModal(false);
     } catch (error) {
       console.error("Payment error:", error);
@@ -148,10 +148,10 @@ export default function Home() {
         </div>
       </div>
       {/* Card de Upload */}
-      <div className="row justify-content-center" style={{marginTop: "-50px"}}>
+      <div className="row justify-content-center" style={{marginTop: "-50px", marginBottom: "-50px"}}>
         <div className="col-md-6 text-center">
           <div className="card bg-transparent border-0 shadow-none p-4 mb-4">
-            <h4 className="card-title">Upload your file now</h4>
+            <h4 className="card-title" style={{fontFamily: 'Orbitron'}}>Upload your file now</h4>
             <div className="card-body">
               <input
                 type="file"
@@ -160,10 +160,10 @@ export default function Home() {
                 onChange={handleFileChange}
               />
               <button
-                className="btn btn-primary w-100 mb-3"
+                className="btn btn-primary w-100 mb-3" style={{backgroundColor: 'transparent', border: 'none', color: 'gray', fontSize: '1.5em'}}
                 onClick={() => document.getElementById("fileInput").click()}
-              > 
-                <BsUpload />
+              > Click here
+                <BsUpload style={{color: 'gray', marginLeft: '15px'}} />
               </button>
             </div>
           </div>
@@ -174,23 +174,23 @@ export default function Home() {
         <div className="col-md-10 d-flex">
           {/* Card de Acompanhamento do Status */}
           <div className="card shadow p-4 mb-2 flex-fill me-3">
-            <h4 className="card-title">Track Your Registration Status</h4>
+            <h4 className="card-title" style={{fontFamily: 'Orbitron'}}>Track Your Registration Status</h4>
             <div className="card-body">
               <input
                 type="text"
                 className="form-control mb-3"
-                placeholder="Paste the registration hash here"
+                placeholder="Paste the wallet address here"
                 value={searchAddress}
                 onChange={(e) => setSearchAddress(e.target.value)}
               />
-              <button className="btn btn-secondary w-100" onClick={handleTrackStatus}>
+              <button className="btn btn-secondary w-100" onClick={handleTrackStatus} style={{fontSize: '1.5em'}}>
                 <BsEye />
               </button>
             </div>
           </div>
           {/* Card de Verificação */}
           <div className="card shadow p-4 mb-2 flex-fill">
-            <h4 className="card-title">Validate Record Hashes Here</h4>
+            <h4 className="card-title" style={{fontFamily: 'Orbitron'}}>Validate authenticity records here</h4>
             <div className="card-body">
               <input
                 type="text"
@@ -199,7 +199,7 @@ export default function Home() {
                 value={searchAddress}
                 onChange={(e) => setSearchAddress(e.target.value)}
               />
-              <button className="btn btn-secondary w-100" onClick={handleSearch}>
+              <button className="btn btn-secondary w-100" onClick={handleSearch} style={{fontSize: '1.5em'}}>
                 <BsCheckCircle />
               </button>
             </div>
@@ -220,7 +220,7 @@ export default function Home() {
               </div>
               <div className="modal-body">
                 <div className="form-group">
-                  <label htmlFor="paymentAddress">Payment Address</label>
+                  <label htmlFor="paymentAddress">Payment to Wallet Address</label>
                   <input
                     type="text"
                     className="form-control mb-3"

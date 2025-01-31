@@ -10,9 +10,9 @@ export default function Toaster({ message, type }) {
   };
 
   return (
-    <div className={`toast-container position-fixed top-0 end-0 p-3`} style={{ zIndex: 1050 }}>
+    <div className={`toast-container position-fixed bottom-0 end-0 p-3`} style={{ zIndex: 1050 }}>
       <div className={`toast show ${getBackgroundColor()}`} role="alert">
-        <div className="toast-body">{message}</div>
+        <div className="toast-body" style={{fontSize: '1.5em'}}>{message}</div>
       </div>
     </div>
   );
