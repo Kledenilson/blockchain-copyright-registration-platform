@@ -5,16 +5,17 @@ import { generateFileHash } from "../utils/hashGenerator";
 import Header from "../components/Header";
 import Toaster from "../components/Toaster";
 import io from "socket.io-client";
-import { BsUpload, BsCheckCircle } from "react-icons/bs"; // Importando o ícone de upload do React Icons
+import { BsUpload, BsCheckCircle, BsEye } from "react-icons/bs"; // Importando o ícone de visualização
 
-const socket = io("http://localhost:5000");
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const socket = io(API_URL);
 
 export default function Home() {
   const [file, setFile] = useState(null);
   const [uploadResponse, setUploadResponse] = useState(null);
   const [address, setAddress] = useState("");
   const [searchAddress, setSearchAddress] = useState("");
-  const [amount, setAmount] = useState(0.01);
+  const [amount, setAmount] = useState(0.0001); // Definindo o valor inicial de amount como 0.0001
   const [hash, setHash] = useState("");
   const [toastMessage, setToastMessage] = useState(null);
   const [toastType, setToastType] = useState("success");
@@ -29,7 +30,7 @@ export default function Home() {
       if (data.address === address) {
         showToast("Your payment has been successfully received!", "success");
         setTxHash(data.txid);
-        setFileDownloadLink(`http://localhost:5000/api/files/${data.txid}`);
+        setFileDownloadLink(`${API_URL}/api/files/${data.txid}`);
         setShowDownloadModal(true);
       }
     });
@@ -37,6 +38,12 @@ export default function Home() {
       socket.off("payment_confirmed");
     };
   }, [address]);
+
+  useEffect(() => {
+    if (file && hash) {
+      handleUpload();
+    }
+  }, [file, hash]);
 
   const showToast = (message, type = "success") => {
     setToastMessage(message);
@@ -68,7 +75,7 @@ export default function Home() {
     formData.append("data", hash);
     try {
       const response = await axios.post(
-        "http://localhost:5000/api/transaction/upload",
+        `${API_URL}/api/transaction/upload`,
         formData
       );
       setUploadResponse(response.data);
@@ -88,7 +95,7 @@ export default function Home() {
     }
     try {
       const response = await axios.post(
-        "http://localhost:5000/api/transaction/send",
+        `${API_URL}/api/transaction/send`,
         {
           address: address,
           amount: amount,
@@ -107,6 +114,15 @@ export default function Home() {
       showToast("Enter an address to search!", "error");
       return;
     }
+    router.push(`/history?address=${searchAddress}`);
+  };
+
+  const handleTrackStatus = () => {
+    if (!searchAddress) {
+      showToast("Enter an address to search!", "error");
+      return;
+    }
+    // Chama o mesmo endpoint do handleSearch
     router.push(`/history?address=${searchAddress}`);
   };
 
@@ -131,44 +147,65 @@ export default function Home() {
           </div>
         </div>
       </div>
-      <div className="row justify-content-center">
-        {/* Card de Upload */}
-        <div className="col-md-5 me-5">
-          <div className="card shadow p-4 mb-2">
+      {/* Card de Upload */}
+      <div className="row justify-content-center" style={{marginTop: "-50px"}}>
+        <div className="col-md-6 text-center">
+          <div className="card bg-transparent border-0 shadow-none p-4 mb-4">
             <h4 className="card-title">Upload your file now</h4>
             <div className="card-body">
               <input
                 type="file"
-                className="form-control mb-5"
+                className="d-none"
+                id="fileInput"
                 onChange={handleFileChange}
               />
-              <button className="btn btn-primary w-100 mb-3" onClick={handleUpload}>
-                <BsUpload /> {/* Ícone de upload */}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Card de Verificação */}
-        <div className="col-md-5">
-          <div className="card shadow p-4 mb-5">
-            <h4 className="card-title">Validate record hashes here</h4>
-            <div className="card-body">
-              <input
-                type="text"
-                className="form-control mb-5"
-                placeholder="Paste the registration hash here"
-                value={searchAddress}
-                onChange={(e) => setSearchAddress(e.target.value)}
-              />
-              <button className="btn btn-secondary w-100" onClick={handleSearch}>
-              <BsCheckCircle /> 
+              <button
+                className="btn btn-primary w-100 mb-3"
+                onClick={() => document.getElementById("fileInput").click()}
+              > 
+                <BsUpload />
               </button>
             </div>
           </div>
         </div>
       </div>
-
+      {/* Cards de Acompanhamento e Verificação */}
+      <div className="row justify-content-center">
+        <div className="col-md-10 d-flex">
+          {/* Card de Acompanhamento do Status */}
+          <div className="card shadow p-4 mb-2 flex-fill me-3">
+            <h4 className="card-title">Track Your Registration Status</h4>
+            <div className="card-body">
+              <input
+                type="text"
+                className="form-control mb-3"
+                placeholder="Paste the registration hash here"
+                value={searchAddress}
+                onChange={(e) => setSearchAddress(e.target.value)}
+              />
+              <button className="btn btn-secondary w-100" onClick={handleTrackStatus}>
+                <BsEye />
+              </button>
+            </div>
+          </div>
+          {/* Card de Verificação */}
+          <div className="card shadow p-4 mb-2 flex-fill">
+            <h4 className="card-title">Validate Record Hashes Here</h4>
+            <div className="card-body">
+              <input
+                type="text"
+                className="form-control mb-3"
+                placeholder="Paste the registration hash here"
+                value={searchAddress}
+                onChange={(e) => setSearchAddress(e.target.value)}
+              />
+              <button className="btn btn-secondary w-100" onClick={handleSearch}>
+                <BsCheckCircle />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
       {showPaymentModal && (
         <div className="modal fade show d-block" tabIndex="-1">
           <div className="modal-dialog">
@@ -215,7 +252,6 @@ export default function Home() {
           </div>
         </div>
       )}
-
       {showDownloadModal && (
         <div className="modal fade show d-block" tabIndex="-1">
           <div className="modal-dialog">
