@@ -5,7 +5,7 @@ import { generateFileHash } from "../utils/hashGenerator";
 import Header from "../components/Header";
 import Toaster from "../components/Toaster";
 import io from "socket.io-client";
-import { BsUpload, BsCheckCircle, BsEye } from "react-icons/bs"; // Importando o ícone de visualização
+import { BsUpload, BsCheckCircle, BsEye, BsSearch } from "react-icons/bs"; // Importando o ícone de visualização
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const socket = io(API_URL);
@@ -23,6 +23,9 @@ export default function Home() {
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [txHash, setTxHash] = useState("");
   const [fileDownloadLink, setFileDownloadLink] = useState("");
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyTransactions, setHistoryTransactions] = useState([]);
+  const [historySelectedTransaction, setHistorySelectedTransaction] = useState(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -101,8 +104,11 @@ export default function Home() {
           amount: amount,
         }
       );
-      showToast("Payment sent! Await confirmation... Track you registration.", "success");
+      showToast("Payment sent! Await confirmation...", "success");
       setShowPaymentModal(false);
+      // Carregar os detalhes da transação na modal de histórico
+      fetchHistoryTransactions(address);
+      setShowHistoryModal(true);
     } catch (error) {
       console.error("Payment error:", error);
       showToast("Payment failed. Try again.", "error");
@@ -122,8 +128,44 @@ export default function Home() {
       showToast("Enter an address to search!", "error");
       return;
     }
+
+    fetchHistoryTransactions(searchAddress);
+    setShowHistoryModal(true);
     // Chama o mesmo endpoint do handleSearch
-    router.push(`/history?address=${searchAddress}`);
+    //router.push(`/history?address=${searchAddress}`);
+  };
+
+  const handleCloseModals = () => {
+    setShowPaymentModal(false);
+    setShowDownloadModal(false);
+    setShowHistoryModal(false);
+    setHistoryTransactions([]);
+    setHistorySelectedTransaction(null);
+  };
+
+  const fetchHistoryTransactions = async (address) => {
+    if (!address) return; // Aguarda o endereço estar disponível
+    try {
+      const response = await axios.get(
+        `${API_URL}/api/transactions/${address}`
+      );
+      setHistoryTransactions(response.data.transactions);
+    } catch (error) {
+      console.error("Error fetching transactions:", error);
+      showToast("Failed to fetch transactions. Try again.", "error");
+    }
+  };
+
+  const fetchTransactionDetails = async (txid) => {
+    try {
+      const response = await axios.get(
+        `${API_URL}/api/transaction/${txid}`
+      );
+      setHistorySelectedTransaction(response.data.transaction);
+    } catch (error) {
+      console.error("Error fetching transaction details:", error);
+      showToast("Failed to fetch transaction details. Try again.", "error");
+    }
   };
 
   return (
@@ -133,7 +175,7 @@ export default function Home() {
       <div className="container my-5">
         <div className="row justify-content-center">
           <div className="col-md-8" style={{ marginTop: "-40px" }}>
-            <blockquote className="blockquote border-start border-4 border-primary p-4 shadow-sm">
+            <blockquote className="blockquote border-start border-0 p-4">
               <p className="mb-3" style={{ fontSize: "0.9em" }}>
                 Register your documents, works and all files that require
                 integrity and preserved authorship here now on the blockchain.
@@ -148,7 +190,7 @@ export default function Home() {
         </div>
       </div>
       {/* Card de Upload */}
-      <div className="row justify-content-center" style={{marginTop: "-50px", marginBottom: "-50px"}}>
+      <div className="row justify-content-center" style={{marginTop: "-70px", marginBottom: "-50px"}}>
         <div className="col-md-6 text-center">
           <div className="card bg-transparent border-0 shadow-none p-4 mb-4">
             <h4 className="card-title" style={{fontFamily: 'Orbitron'}}>Upload your file now</h4>
@@ -160,10 +202,10 @@ export default function Home() {
                 onChange={handleFileChange}
               />
               <button
-                className="btn btn-primary w-100 mb-3" style={{backgroundColor: 'transparent', border: 'none', color: 'gray', fontSize: '1.5em'}}
+                className="btn btn-primary w-100 mb-3" style={{border: 'none', color: 'white', fontSize: '1.4em'}}
                 onClick={() => document.getElementById("fileInput").click()}
               > Click here
-                <BsUpload style={{color: 'gray', marginLeft: '15px'}} />
+                <BsUpload style={{color: 'white', marginLeft: '15px'}} />
               </button>
             </div>
           </div>
@@ -183,7 +225,7 @@ export default function Home() {
                 value={searchAddress}
                 onChange={(e) => setSearchAddress(e.target.value)}
               />
-              <button className="btn btn-secondary w-100" onClick={handleTrackStatus} style={{fontSize: '1.5em'}}>
+              <button className="btn btn-primary w-100" onClick={handleTrackStatus} style={{fontSize: '1.5em'}}>
                 <BsEye />
               </button>
             </div>
@@ -196,10 +238,10 @@ export default function Home() {
                 type="text"
                 className="form-control mb-3"
                 placeholder="Paste the registration hash here"
-                value={searchAddress}
-                onChange={(e) => setSearchAddress(e.target.value)}
+                //value={searchAddress}
+                //onChange={(e) => setSearchAddress(e.target.value)}
               />
-              <button className="btn btn-secondary w-100" onClick={handleSearch} style={{fontSize: '1.5em'}}>
+              <button className="btn btn-primary w-100" style={{fontSize: '1.5em'}}>
                 <BsCheckCircle />
               </button>
             </div>
@@ -207,8 +249,9 @@ export default function Home() {
         </div>
       </div>
       {showPaymentModal && (
+        <div className="modal-overlay">
         <div className="modal fade show d-block" tabIndex="-1">
-          <div className="modal-dialog">
+          <div className="modal-dialog modal-dialog-centered">
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>Make a Payment</h5>
@@ -251,10 +294,104 @@ export default function Home() {
             </div>
           </div>
         </div>
+        </div>
       )}
+      {showHistoryModal && (
+      <>
+        <div className="modal-overlay" onClick={handleCloseModals}></div>
+        <div className="modal fade show d-block" tabIndex="-1">
+          <div className="modal-dialog modal-dialog-centered modal-lg">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>Transaction Details</h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={handleCloseModals}
+                ></button>
+              </div>
+              <div className="modal-body">
+                {/* <h1 className="text-center mb-4 text-primary">Transaction Details</h1> */}
+                <div className="card shadow p-4">
+                  <h6 className="card-title" style={{fontSize: '1.2em', textAlign: 'center'}}>
+                  Save now in a safe place, the codes below to check the transaction: <p><b>{address}</b></p></h6>
+                  <div className="card-body">
+                    {historyTransactions.length === 0 ? (
+                      <p className="text-center text-muted">No transactions found for this address.</p>
+                    ) : (
+                      <table className="table table-striped">
+                        <thead>
+                          <tr>
+                            <th>TXID</th>                            
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {historyTransactions.map((tx) => (
+                            <tr key={tx.txids}>
+                              <td>
+                                <button
+                                  className="btn btn-link p-0 d-flex align-items-center"                                  
+                                  onClick={() => fetchTransactionDetails(tx.txids)}
+                                >  <BsSearch className="me-2" style={{fontSize: '0.9em'}}/>                                
+                                <div style={{fontWeight: '200', TextDecoration: 'none', fontSize: '1em'}}>
+                                   {tx.txids}
+                                </div>                                 
+                                </button>
+                              </td>                             
+                              <td>
+                                <span
+                                  className={`badge ${
+                                    tx.status === "success"
+                                      ? "bg-success"
+                                      : "bg-warning text-dark"
+                                  }`}
+                                >
+                                  {tx.status ? "success" : "pending"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+                {/* Detalhes da transação selecionada */}
+                {historySelectedTransaction && (
+                  <div className="card shadow p-4 mt-4">
+                    <h3 className="card-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>
+                    Registration transaction details</h3>
+                    <div className="card-body">
+                      <p><strong>TXID:</strong> {historySelectedTransaction.txid}</p>
+                      <p><strong>Received By:</strong> {historySelectedTransaction.address}</p>
+                      <p><strong>Amount:</strong> {historySelectedTransaction.amount} BTC</p>
+                      <p><strong>Status:</strong> 
+                        <span className={`badge ${historySelectedTransaction.status === "confirmed" ? "bg-success" : "bg-warning text-dark"}`}>
+                          {historySelectedTransaction.status || "pending"}
+                        </span>
+                      </p>
+                      <p><strong>Date:</strong> {historySelectedTransaction.time
+                        ? new Date(historySelectedTransaction.time * 1000).toLocaleString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "No Date Available"}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    )}
       {showDownloadModal && (
         <div className="modal fade show d-block" tabIndex="-1">
-          <div className="modal-dialog">
+          <div className="modal-dialog modal-dialog-centered">
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">Payment Confirmed</h5>
@@ -275,6 +412,19 @@ export default function Home() {
           </div>
         </div>
       )}
+       {/* Estilos para centralizar o Toaster */}
+       <style jsx global>{`
+       
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: rgba(0, 0, 0, 0.5);
+          z-index: 1040;
+        }
+      `}</style>
     </div>
   );
 }
