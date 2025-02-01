@@ -27,8 +27,14 @@ export default function History() {
         `${API_URL}/api/transactions/${address}`
       );
       
-      setTransactions(response.data.transactions);
-      console.log(response.data);
+      // Garante que as transações tenham o formato correto
+      const formattedTransactions = response.data.transactions.map(tx => ({
+        ...tx,
+        amount: tx.amount || 0, // Garante que o amount seja um número
+        status: tx.status || "pending", // Garante que o status seja definido
+      }));
+console.log("dados aqui: ", formattedTransactions);
+      setTransactions(formattedTransactions);
     } catch (error) {
       console.error("Error fetching transactions:", error);
       showToast("Failed to fetch transactions. Try again.", "error");
@@ -149,8 +155,8 @@ export default function History() {
             Registration transaction details</h3>
             <div className="card-body">
               <p><strong>TXID:</strong> {selectedTransaction.txid}</p>
-              <p><strong>Received By:</strong> {selectedTransaction.address}</p>
-              <p><strong>Amount:</strong> {selectedTransaction.amount} BTC</p>
+              <p><strong>Received By:</strong> {selectedTransaction.vout[0].scriptPubKey.address}</p>
+              <p><strong>Amount:</strong> {selectedTransaction.vout[0].value} BTC</p>
               <p><strong>Status:</strong> 
                 <span className={`badge ${selectedTransaction.status === "confirmed" ? "bg-success" : "bg-warning text-dark"}`}>
                   {selectedTransaction.status || "pending"}

@@ -5,7 +5,7 @@ import { generateFileHash } from "../utils/hashGenerator";
 import Header from "../components/Header";
 import Toaster from "../components/Toaster";
 import io from "socket.io-client";
-import { BsUpload, BsCheckCircle, BsEye, BsSearch } from "react-icons/bs"; // Importando o ícone de visualização
+import { BsUpload, BsCheckCircle, BsEye, BsSearch, BsArrowClockwise } from "react-icons/bs";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const socket = io(API_URL);
@@ -13,6 +13,7 @@ const socket = io(API_URL);
 export default function Home() {
   const [file, setFile] = useState(null);
   const [uploadResponse, setUploadResponse] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [address, setAddress] = useState("");
   const [searchAddress, setSearchAddress] = useState("");
   const [amount, setAmount] = useState(0.0001); // Definindo o valor inicial de amount como 0.0001
@@ -73,6 +74,9 @@ export default function Home() {
       showToast("Select a file before uploading!", "error");
       return;
     }
+
+    setIsLoading(true);
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("data", hash);
@@ -88,6 +92,8 @@ export default function Home() {
     } catch (error) {
       console.error("Upload error:", error);
       showToast("Failed to upload file. Try again.", "error");
+    } finally {
+      setIsLoading(false); 
     }
   };
 
@@ -117,7 +123,7 @@ export default function Home() {
 
   const handleSearch = () => {
     if (!searchAddress) {
-      showToast("Enter an address to search!", "error");
+      showToast("Enter an registration hash to search!", "error");
       return;
     }
     router.push(`/history?address=${searchAddress}`);
@@ -129,10 +135,10 @@ export default function Home() {
       return;
     }
 
-    fetchHistoryTransactions(searchAddress);
-    setShowHistoryModal(true);
+    //fetchHistoryTransactions(searchAddress);
+    //setShowHistoryModal(true);
     // Chama o mesmo endpoint do handleSearch
-    //router.push(`/history?address=${searchAddress}`);
+    router.push(`/history?address=${searchAddress}`);
   };
 
   const handleCloseModals = () => {
@@ -148,7 +154,7 @@ export default function Home() {
     try {
       const response = await axios.get(
         `${API_URL}/api/transactions/${address}`
-      );
+      );      
       setHistoryTransactions(response.data.transactions);
     } catch (error) {
       console.error("Error fetching transactions:", error);
@@ -160,8 +166,8 @@ export default function Home() {
     try {
       const response = await axios.get(
         `${API_URL}/api/transaction/${txid}`
-      );
-      setHistorySelectedTransaction(response.data.transaction);
+      );      
+      setHistorySelectedTransaction(response.data);
     } catch (error) {
       console.error("Error fetching transaction details:", error);
       showToast("Failed to fetch transaction details. Try again.", "error");
@@ -363,14 +369,15 @@ export default function Home() {
                     <h3 className="card-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>
                     Registration transaction details</h3>
                     <div className="card-body">
-                      <p><strong>TXID:</strong> {historySelectedTransaction.txid}</p>
-                      <p><strong>Received By:</strong> {historySelectedTransaction.address}</p>
-                      <p><strong>Amount:</strong> {historySelectedTransaction.amount} BTC</p>
+                      <p><strong>TXID:</strong> {historySelectedTransaction.transaction.txid}</p>
+                      <p><strong>Received By:</strong> {historySelectedTransaction.transaction.vout[1].scriptPubKey.address}</p>
+                      <p><strong>Amount:</strong> {historySelectedTransaction.transaction.vout[1].value} BTC</p>
                       <p><strong>Status:</strong> 
-                        <span className={`badge ${historySelectedTransaction.status === "confirmed" ? "bg-success" : "bg-warning text-dark"}`}>
+                        <span className={`badge ${historySelectedTransaction.status === "success" ? "bg-success" : "bg-warning text-dark"}`}>
                           {historySelectedTransaction.status || "pending"}
                         </span>
                       </p>
+                      
                       <p><strong>Date:</strong> {historySelectedTransaction.time
                         ? new Date(historySelectedTransaction.time * 1000).toLocaleString("pt-BR", {
                             day: "2-digit",
@@ -412,9 +419,14 @@ export default function Home() {
           </div>
         </div>
       )}
-       {/* Estilos para centralizar o Toaster */}
-       <style jsx global>{`
-       
+      {isLoading && (
+        <div className="loading-overlay-white">
+          <div className="loading-spinner">
+            <BsArrowClockwise className="spinner-icon" />
+          </div>
+        </div>
+      )}
+      <style jsx global>{`       
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -423,6 +435,33 @@ export default function Home() {
           bottom: 0;
           background-color: rgba(0, 0, 0, 0.5);
           z-index: 1040;
+        }
+        .loading-overlay-white {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: rgba(255, 255, 255, 0.8); /* Overlay branco transparente */
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 1050; /* Garante que o overlay fique acima de tudo */
+        }
+
+        .loading-spinner {
+          font-size: 3rem;
+          color: #007bff; /* Cor do spinner */
+          animation: spin 1s linear infinite; /* Animação de rotação */
+        }
+
+        @keyframes spin {
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
         }
       `}</style>
     </div>

@@ -122,7 +122,7 @@ def monitor_transactions():
     while True:
         time.sleep(10)
         try:
-            conn = sqlite3.connect("data/transactions.db")
+            conn = get_db_connection()
             cursor = conn.cursor()
 
             cursor.execute("SELECT id, txid FROM transactions WHERE status = 'pending'")
@@ -130,7 +130,7 @@ def monitor_transactions():
 
             for tx_id, txid in pending_transactions:
                 try:
-                    transaction = rpc.gettransaction(txid)
+                    transaction = rpc.gettransaction(txid)                    
                 except Exception as e:
                     print(f"Error fetching transaction {txid}: {e}")
                     continue
@@ -150,7 +150,7 @@ def monitor_transactions():
                         print(f"Warning: No valid address found for TXID {txid}")
                         continue
 
-                    cursor.execute("UPDATE transactions SET status = 'confirmed' WHERE id = ?", (tx_id,))
+                    cursor.execute("UPDATE transactions SET status = 'confirmed' WHERE id = ? AND ", (tx_id,))
                     conn.commit()
 
                     socketio.emit("payment_confirmed", {
@@ -281,7 +281,7 @@ def confirm_transaction(txid):
     Verifica o status de uma transação específica.
     """
     try:
-        conn = sqlite3.connect("transactions.db")
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT status FROM transactions WHERE txid = ?", (txid,))
         result = cursor.fetchone()
@@ -478,6 +478,13 @@ def send_transaction():
         # Envia a transação
         print(f"📌 Enviando {amount} BTC para {address}...")
         txid = rpc.sendtoaddress(address, float(amount))
+        
+        connDB = get_db_connection()
+        cursor = connDB.cursor()        
+        
+        cursor.execute("UPDATE transactions SET txid = ? WHERE client_address = ?", (txid, address))
+        connDB.commit()
+        
         print(f"✅ Transação enviada com sucesso! TXID: {txid}")
 
         return jsonify({
@@ -738,6 +745,22 @@ def generate_blocks(wallet, num_blocks=101):
         print(f"Primeiro bloco: {block_hashes[0]}")
     except Exception as e:
         print(f"Erro ao gerar blocos: {e}")
+        
+# Blocks
+@app.route('/api/block/generate', methods=['POST'])
+def generate_blocks():
+    try:
+        num_blocks = request.json.get('num_blocks')
+        address = request.json.get('address')
+
+        if not num_blocks or not address:
+            return jsonify({"status": "error", "message": '"num_blocks" and "address" parameters are required!'}), 400
+
+        rpc = get_rpc_connection()
+        block_hashes = rpc.generatetoaddress(num_blocks, address)
+        return jsonify({"status": "success", "message": "Blocks generated successfully!", "block_hashes": block_hashes})
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
 
 # RPC remote commands terminal
 @app.route('/api/rpc-command', methods=['POST'])
