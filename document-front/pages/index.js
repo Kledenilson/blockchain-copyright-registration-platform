@@ -5,7 +5,7 @@ import { generateFileHash } from "../utils/hashGenerator";
 import Header from "../components/Header";
 import Toaster from "../components/Toaster";
 import io from "socket.io-client";
-import { BsUpload, BsCheckCircle, BsEye, BsSearch, BsArrowClockwise } from "react-icons/bs";
+import { BsUpload, BsCheckCircle, BsEye, BsSearch} from "react-icons/bs";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const socket = io(API_URL);
@@ -25,7 +25,9 @@ export default function Home() {
   const [txHash, setTxHash] = useState("");
   const [fileDownloadLink, setFileDownloadLink] = useState("");
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [historyTransactions, setHistoryTransactions] = useState([]);
+  const [historyTransactions, setHistoryTransactions] = useState([]);  
+  const [vt, setVt] = useState(0);
+  const [confirmations, setConfirmations] = useState(0);
   const [historySelectedTransaction, setHistorySelectedTransaction] = useState(null);
   const router = useRouter();
 
@@ -134,11 +136,9 @@ export default function Home() {
       showToast("Enter an address to search!", "error");
       return;
     }
-
-    //fetchHistoryTransactions(searchAddress);
-    //setShowHistoryModal(true);
-    // Chama o mesmo endpoint do handleSearch
-    router.push(`/history?address=${searchAddress}`);
+    fetchHistoryTransactions(searchAddress);
+    setShowHistoryModal(true);
+    // router.push(`/history?address=${searchAddress}`);
   };
 
   const handleCloseModals = () => {
@@ -156,6 +156,7 @@ export default function Home() {
         `${API_URL}/api/transactions/${address}`
       );      
       setHistoryTransactions(response.data.transactions);
+      response.data.transactions.transaction.confirmations==0 ? setVt(0) : setVt(1);     
     } catch (error) {
       console.error("Error fetching transactions:", error);
       showToast("Failed to fetch transactions. Try again.", "error");
@@ -167,7 +168,8 @@ export default function Home() {
       const response = await axios.get(
         `${API_URL}/api/transaction/${txid}`
       );      
-      setHistorySelectedTransaction(response.data);
+      setHistorySelectedTransaction(response.data.transaction);      
+      historyTransactions.confirmations > 0 ? setConfirmations(historyTransactions.confirmations) : null ;
     } catch (error) {
       console.error("Error fetching transaction details:", error);
       showToast("Failed to fetch transaction details. Try again.", "error");
@@ -320,7 +322,7 @@ export default function Home() {
                 {/* <h1 className="text-center mb-4 text-primary">Transaction Details</h1> */}
                 <div className="card shadow p-4">
                   <h6 className="card-title" style={{fontSize: '1.2em', textAlign: 'center'}}>
-                  Save now in a safe place, the codes below to check the transaction: <p><b>{address}</b></p></h6>
+                  Save now in a safe place, the codes below to check the transaction: <p><b>{!address ? searchAddress : address}</b></p></h6>
                   <div className="card-body">
                     {historyTransactions.length === 0 ? (
                       <p className="text-center text-muted">No transactions found for this address.</p>
@@ -334,7 +336,7 @@ export default function Home() {
                         </thead>
                         <tbody>
                           {historyTransactions.map((tx) => (
-                            <tr key={tx.txids}>
+                            <tr key={tx.txids}>                        
                               <td>
                                 <button
                                   className="btn btn-link p-0 d-flex align-items-center"                                  
@@ -348,12 +350,12 @@ export default function Home() {
                               <td>
                                 <span
                                   className={`badge ${
-                                    tx.status === "success"
+                                    confirmations > 0
                                       ? "bg-success"
                                       : "bg-warning text-dark"
                                   }`}
                                 >
-                                  {tx.status ? "success" : "pending"}
+                                  {confirmations > 0 ? "success" : "pending"}
                                 </span>
                               </td>
                             </tr>
@@ -364,20 +366,19 @@ export default function Home() {
                   </div>
                 </div>
                 {/* Detalhes da transação selecionada */}
-                {historySelectedTransaction && (
+                {historySelectedTransaction && (               
+                
                   <div className="card shadow p-4 mt-4">
                     <h3 className="card-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>
                     Registration transaction details</h3>
                     <div className="card-body">
-                      <p><strong>TXID:</strong> {historySelectedTransaction.transaction.txid}</p>
-                      <p><strong>Received By:</strong> {historySelectedTransaction.transaction.vout[1].scriptPubKey.address}</p>
-                      <p><strong>Amount:</strong> {historySelectedTransaction.transaction.vout[1].value} BTC</p>
+                      <p><strong>TXID:</strong> {historySelectedTransaction.txid}</p>
+                      <p><strong>Received By:</strong> {historySelectedTransaction.vout[vt].scriptPubKey.address}</p>
+                      <p><strong>Amount:</strong> {historySelectedTransaction.vout[vt].value} BTC</p>
                       <p><strong>Status:</strong> 
-                        <span className={`badge ${historySelectedTransaction.status === "success" ? "bg-success" : "bg-warning text-dark"}`}>
-                          {historySelectedTransaction.status || "pending"}
+                        <span className={`badge ${ confirmations > 0 ? "bg-success" : "bg-warning text-dark"}`}> {confirmations > 0 ? "success" : "pending"}
                         </span>
-                      </p>
-                      
+                      </p>                      
                       <p><strong>Date:</strong> {historySelectedTransaction.time
                         ? new Date(historySelectedTransaction.time * 1000).toLocaleString("pt-BR", {
                             day: "2-digit",
@@ -421,8 +422,7 @@ export default function Home() {
       )}
       {isLoading && (
         <div className="loading-overlay-white">
-          <div className="loading-spinner">
-            <BsArrowClockwise className="spinner-icon" />
+          <div className="modern-spinner">            
           </div>
         </div>
       )}
@@ -449,9 +449,12 @@ export default function Home() {
           z-index: 1050; /* Garante que o overlay fique acima de tudo */
         }
 
-        .loading-spinner {
-          font-size: 3rem;
-          color: #007bff; /* Cor do spinner */
+        .modern-spinner {
+          width: 50px;
+          height: 50px;
+          border: 4px solid #f3f3f3; /* Cor de fundo do spinner */
+          border-top: 4px solid #007bff; /* Cor do spinner */
+          border-radius: 50%;
           animation: spin 1s linear infinite; /* Animação de rotação */
         }
 
