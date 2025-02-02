@@ -27,12 +27,12 @@ export default function Home() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyTransactions, setHistoryTransactions] = useState([]);  
   const [vt, setVt] = useState(0);
-  const [confirmations, setConfirmations] = useState(0);
+  const [confirmations, setConfirmations] = useState("");
   const [historySelectedTransaction, setHistorySelectedTransaction] = useState(null);
   const router = useRouter();
 
   useEffect(() => {
-    socket.on("payment_confirmed", (data) => {
+    socket.on("payment_confirmed", (data) => {      
       if (data.address === address) {
         showToast("Your payment has been successfully received!", "success");
         setTxHash(data.txid);
@@ -150,13 +150,15 @@ export default function Home() {
   };
 
   const fetchHistoryTransactions = async (address) => {
-    if (!address) return; // Aguarda o endereço estar disponível
+    if (!address) return;
     try {
       const response = await axios.get(
         `${API_URL}/api/transactions/${address}`
       );      
       setHistoryTransactions(response.data.transactions);
-      response.data.transactions.transaction.confirmations==0 ? setVt(0) : setVt(1);     
+        response.data.transactions.map( (h) => {        
+          setConfirmations(h.confirmations);
+        })            
     } catch (error) {
       console.error("Error fetching transactions:", error);
       showToast("Failed to fetch transactions. Try again.", "error");
@@ -168,8 +170,7 @@ export default function Home() {
       const response = await axios.get(
         `${API_URL}/api/transaction/${txid}`
       );      
-      setHistorySelectedTransaction(response.data.transaction);      
-      historyTransactions.confirmations > 0 ? setConfirmations(historyTransactions.confirmations) : null ;
+      setHistorySelectedTransaction(response.data.transaction);   
     } catch (error) {
       console.error("Error fetching transaction details:", error);
       showToast("Failed to fetch transaction details. Try again.", "error");
@@ -311,7 +312,7 @@ export default function Home() {
           <div className="modal-dialog modal-dialog-centered modal-lg">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>Transaction Details</h5>
+                <h5 className="modal-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>Transaction Details</h5>                
                 <button
                   type="button"
                   className="btn-close"
@@ -335,12 +336,12 @@ export default function Home() {
                           </tr>
                         </thead>
                         <tbody>
-                          {historyTransactions.map((tx) => (
+                          {historyTransactions.map((tx) => (                            
                             <tr key={tx.txids}>                        
                               <td>
                                 <button
                                   className="btn btn-link p-0 d-flex align-items-center"                                  
-                                  onClick={() => fetchTransactionDetails(tx.txids)}
+                                  onClick={() => fetchTransactionDetails(tx.txids) }
                                 >  <BsSearch className="me-2" style={{fontSize: '0.9em'}}/>                                
                                 <div style={{fontWeight: '200', TextDecoration: 'none', fontSize: '1em'}}>
                                    {tx.txids}
@@ -350,12 +351,12 @@ export default function Home() {
                               <td>
                                 <span
                                   className={`badge ${
-                                    confirmations > 0
+                                    tx.confirmations >=1
                                       ? "bg-success"
                                       : "bg-warning text-dark"
                                   }`}
                                 >
-                                  {confirmations > 0 ? "success" : "pending"}
+                                  {tx.confirmations >=1  ? "success" : "pending"}
                                 </span>
                               </td>
                             </tr>
@@ -376,7 +377,8 @@ export default function Home() {
                       <p><strong>Received By:</strong> {historySelectedTransaction.vout[vt].scriptPubKey.address}</p>
                       <p><strong>Amount:</strong> {historySelectedTransaction.vout[vt].value} BTC</p>
                       <p><strong>Status:</strong> 
-                        <span className={`badge ${ confirmations > 0 ? "bg-success" : "bg-warning text-dark"}`}> {confirmations > 0 ? "success" : "pending"}
+                        <span className={`badge ${ confirmations >=1 ? "bg-success" : "bg-warning text-dark"}`}> 
+                          {confirmations >=1 ? "success" : "pending"}
                         </span>
                       </p>                      
                       <p><strong>Date:</strong> {historySelectedTransaction.time

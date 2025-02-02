@@ -117,11 +117,12 @@ def ensure_wallet_exists(wallet_name="platform_wallet"):
     except Exception as e:
         print(f"Erro ao verificar ou criar carteira: {e}")
         raise
+    
 def monitor_transactions():
     rpc = get_rpc_connection("platform_wallet")
     while True:
         time.sleep(10)
-        try:
+        try:            
             conn = get_db_connection()
             cursor = conn.cursor()
 
@@ -134,7 +135,7 @@ def monitor_transactions():
                 except Exception as e:
                     print(f"Error fetching transaction {txid}: {e}")
                     continue
-
+                print(f"Passou aqui {tx_id}")
                 confirmations = transaction.get("confirmations", 0)
 
                 if confirmations >= 1:
@@ -150,8 +151,11 @@ def monitor_transactions():
                         print(f"Warning: No valid address found for TXID {txid}")
                         continue
 
-                    cursor.execute("UPDATE transactions SET status = 'confirmed' WHERE id = ? AND ", (tx_id,))
+                    cursor.execute("UPDATE transactions SET status = 'confirmed' WHERE id = ?", (tx_id,))
                     conn.commit()
+                    
+                    # Log para verificar se o evento está sendo emitido
+                    print(f"✅ Emitting payment_confirmed for TXID: {txid}, Address: {address}")
 
                     socketio.emit("payment_confirmed", {
                         "txid": txid,
@@ -161,7 +165,7 @@ def monitor_transactions():
                         "address": address
                     })
 
-            conn.close()
+                    conn.close() 
         except Exception as e:
             print(f"Erro ao monitorar transações: {e}")
 
@@ -500,7 +504,8 @@ def send_transaction():
         print(f"⚠️ Erro inesperado: {e}")
         return jsonify({"status": "error", "message": f"Erro inesperado: {str(e)}"}), 500
     
-    
+
+
 @app.route('/api/transaction/<string:txid>', methods=['GET'])
 def get_transaction_by_hash(txid):
     try:
@@ -757,7 +762,7 @@ def generate_blocks():
             return jsonify({"status": "error", "message": '"num_blocks" and "address" parameters are required!'}), 400
 
         rpc = get_rpc_connection()
-        block_hashes = rpc.generatetoaddress(num_blocks, address)
+        block_hashes = rpc.generatetoaddress(num_blocks, address)        
         return jsonify({"status": "success", "message": "Blocks generated successfully!", "block_hashes": block_hashes})
     except JSONRPCException as e:
         return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
