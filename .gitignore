@@ -2,4 +2,5 @@ document-api/data
 document-api/uploads
 document-front/node_modules
 document-front/.next
+ipfs-data
 

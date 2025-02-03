@@ -84,7 +84,7 @@ export default function Home() {
     formData.append("data", hash);
     try {
       const response = await axios.post(
-        `${API_URL}/api/transaction/upload`,
+        `${API_URL}/api/ipfs/upload`,
         formData
       );
       setUploadResponse(response.data);
@@ -340,10 +340,20 @@ export default function Home() {
                             <tr key={tx.txids}>                        
                               <td>
                                 <button
-                                  className="btn btn-link p-0 d-flex align-items-center"                                  
+                                  className="btn btn-link p-0 d-flex align-items-center"                                                                    
                                   onClick={() => fetchTransactionDetails(tx.txids) }
-                                >  <BsSearch className="me-2" style={{fontSize: '0.9em'}}/>                                
-                                <div style={{fontWeight: '200', TextDecoration: 'none', fontSize: '1em'}}>
+                                  style={{
+                                    fontWeight: '200',
+                                    textDecoration: 'none',
+                                    fontSize: '0.9em',
+                                    background: 'none',
+                                    color: 'gray',
+                                    border: 'none',
+                                    padding: '0',
+                                    cursor: 'default',
+                                  }}
+                                >  <BsSearch className="me-2" style={{fontSize: '1.2em'}}/>                                
+                                <div style={{fontWeight: '200', fontSize: '1.1em'}}>
                                    {tx.txids}
                                 </div>                                 
                                 </button>

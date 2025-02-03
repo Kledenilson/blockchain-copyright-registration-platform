@@ -48,7 +48,21 @@ services:
       - /app/node_modules
     depends_on:
       - document-api
+  ipfs:
+      image: ipfs/go-ipfs:latest
+      container_name: ipfs
+      ports:
+        - "4001:4001"  # Porta de comunicação entre nós IPFS
+        - "5001:5001"  # API HTTP do IPFS
+        - "8080:8080"  # Gateway HTTP do IPFS
+      volumes:
+        - ./ipfs-data:/data/ipfs
+      environment:
+        - IPFS_PATH=/data/ipfs
+      restart: unless-stopped
+      command: ["daemon", "--migrate=true", "--enable-gc"]
 
 volumes:
   bitcoin-data:
   document-data:
+  ipfs-data:
