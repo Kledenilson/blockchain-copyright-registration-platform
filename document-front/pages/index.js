@@ -32,13 +32,10 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    socket.on("payment_confirmed", (data) => {      
-      if (data.address === address) {
-        showToast("Your payment has been successfully received!", "success");
-        setTxHash(data.txid);
-        setFileDownloadLink(`${API_URL}/api/files/${data.txid}`);
-        setShowDownloadModal(true);
-      }
+    socket.on("payment_confirmed", (data) => {
+      setFileDownloadLink(data.download_url);
+      setTxHash(data.txid);
+      setShowDownloadModal(true);
     });
     return () => {
       socket.off("payment_confirmed");
@@ -167,15 +164,25 @@ export default function Home() {
 
   const fetchTransactionDetails = async (txid) => {
     try {
-      const response = await axios.get(
-        `${API_URL}/api/transaction/${txid}`
-      );      
-      setHistorySelectedTransaction(response.data.transaction);   
+        const response = await axios.get(`${API_URL}/api/transaction/ipfs/${txid}`);
+        const transactionData = response.data.transaction;        
+        const confirmations = transactionData.details.confirmations || 0;
+        const ipfsHash = transactionData.ipfs_hash;
+        const downloadUrl = transactionData.download_url;
+
+        setHistorySelectedTransaction({
+            txid: transactionData.txid,
+            confirmations,
+            ipfsHash,
+            downloadUrl,
+            time: transactionData.details.time,
+            vout: transactionData.details.vout
+        });
     } catch (error) {
-      console.error("Error fetching transaction details:", error);
-      showToast("Failed to fetch transaction details. Try again.", "error");
+        console.error("Error fetching transaction details:", error);
+        showToast("Failed to fetch transaction details. Try again.", "error");
     }
-  };
+};
 
   return (
     <div className="container mt-12">
@@ -377,32 +384,43 @@ export default function Home() {
                   </div>
                 </div>
                 {/* Detalhes da transação selecionada */}
-                {historySelectedTransaction && (               
-                
-                  <div className="card shadow p-4 mt-4">
-                    <h3 className="card-title" style={{fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600'}}>
-                    Registration transaction details</h3>
-                    <div className="card-body">
-                      <p><strong>TXID:</strong> {historySelectedTransaction.txid}</p>
-                      <p><strong>Received By:</strong> {historySelectedTransaction.vout[vt].scriptPubKey.address}</p>
-                      <p><strong>Amount:</strong> {historySelectedTransaction.vout[vt].value} BTC</p>
-                      <p><strong>Status:</strong> 
-                        <span className={`badge ${ confirmations >=1 ? "bg-success" : "bg-warning text-dark"}`}> 
-                          {confirmations >=1 ? "success" : "pending"}
-                        </span>
-                      </p>                      
-                      <p><strong>Date:</strong> {historySelectedTransaction.time
-                        ? new Date(historySelectedTransaction.time * 1000).toLocaleString("pt-BR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "No Date Available"}</p>
+                {historySelectedTransaction && (
+                    <div className="card shadow p-4 mt-4">
+                        <h3 className="card-title" style={{ fontFamily: 'Orbitron', fontSize: '1.5em', fontWeight: '600' }}>
+                            Registration Transaction Details
+                        </h3>
+                        <div className="card-body">
+                            <p><strong>TXID:</strong> {historySelectedTransaction.txid}</p>
+                            <p><strong>Received By:</strong> {historySelectedTransaction.vout[0]?.scriptPubKey?.address || "N/A"}</p>
+                            <p><strong>Amount:</strong> {historySelectedTransaction.vout[0]?.value || "N/A"} BTC</p>
+                            <p><strong>Status:</strong>
+                                <span className={`badge ${historySelectedTransaction.confirmations >= 1 ? "bg-success" : "bg-warning text-dark"}`}>
+                                    {historySelectedTransaction.confirmations >= 1 ? "Confirmed" : "Pending"}
+                                </span>
+                            </p>
+                            <p><strong>Date:</strong> {historySelectedTransaction.time
+                                ? new Date(historySelectedTransaction.time * 1000).toLocaleString("pt-BR", {
+                                    day: "2-digit",
+                                    month: "2-digit",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                })
+                                : "No Date Available"}
+                            </p>
+                            {historySelectedTransaction.ipfsHash && (
+                                <>
+                                    <p><strong>Your authenticity record hash (keep securely):</strong></p> {historySelectedTransaction.ipfsHash}
+                                    <p><strong>Download link: </strong>
+                                        <a href={historySelectedTransaction.downloadUrl} target="_blank" rel="noopener noreferrer">
+                                            Click here!
+                                        </a>
+                                    </p>
+                                </>
+                            )}
+                        </div>
                     </div>
-                  </div>
-                )}
+               )}
               </div>
             </div>
           </div>

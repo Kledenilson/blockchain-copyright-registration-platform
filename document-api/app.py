@@ -7,7 +7,6 @@ from decimal import Decimal
 from threading import Thread
 from flask_socketio import SocketIO, emit
 from gevent import monkey
-monkey.patch_all()
 from werkzeug.utils import secure_filename
 import requests
 
@@ -169,15 +168,26 @@ def upload_transaction():
         rpc = get_rpc_connection(wallet_name)
         address = rpc.getnewaddress()
 
+        # Valida os valores antes de inserir no banco de dados
+        if not isinstance(address, str):
+            return jsonify({"status": "error", "message": "Endereço gerado inválido."}), 500
+        if not isinstance(ipfs_hash, str):
+            return jsonify({"status": "error", "message": "Hash IPFS inválido."}), 500
+
         # Salva no banco de dados
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO transactions (client_address, hash, ipfs_hash, status) VALUES (?, ?, ?, ?)",
-            (address, data, ipfs_hash, "pending")
-        )
-        conn.commit()
-        conn.close()
+        try:
+            cursor.execute(
+                "INSERT INTO transactions (client_address, hash, ipfs_hash, status) VALUES (?, ?, ?, ?)",
+                (address, data, ipfs_hash, "pending")
+            )
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            return jsonify({"status": "error", "message": f"Erro ao salvar no banco de dados: {str(e)}"}), 500
+        finally:
+            conn.close()
 
         # Retorna o hash IPFS e o link de download
         download_url = f"http://127.0.0.1:8080/ipfs/{ipfs_hash}"  # Gateway HTTP do IPFS
@@ -242,14 +252,20 @@ def monitor_transactions():
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT id, txid, ipfs_hash, hash FROM transactions WHERE status = 'pending'")
+            cursor.execute("SELECT id, txid, ipfs_hash FROM transactions WHERE status = 'pending'")
             pending_transactions = cursor.fetchall()
 
-            for tx_id, txid, ipfs_hash, hash in pending_transactions:
+            for tx_id, txid, ipfs_hash in pending_transactions:
                 try:
+                    # Verifica se o TXID é válido
+                    if not txid or txid.strip() == "":
+                        print(f"TXID inválido para transação ID {tx_id}. Ignorando...")
+                        continue
+
+                    # Obtém os detalhes da transação
                     transaction = rpc.gettransaction(txid)
                 except Exception as e:
-                    print(f"Error fetching transaction {txid}: {e}")
+                    print(f"Erro ao buscar transação {txid}: {e}")
                     continue
 
                 confirmations = transaction.get("confirmations", 0)
@@ -257,13 +273,12 @@ def monitor_transactions():
                     address = None
                     amount = 0
                     details = transaction.get("details", [])
-
                     if details and isinstance(details, list):
                         address = details[0].get("address", "unknown")
                         amount = details[0].get("amount", 0)
 
                     if not address:
-                        print(f"Warning: No valid address found for TXID {txid}")
+                        print(f"Aviso: Nenhum endereço válido encontrado para TXID {txid}")
                         continue
 
                     # Atualiza o status da transação no banco de dados para 'confirmed'
@@ -272,21 +287,24 @@ def monitor_transactions():
 
                     # Cria a transação OP_RETURN com o hash IPFS
                     try:
-                        create_opreturn_transaction(hash)
+                        print(f"Criando transação OP_RETURN para hash IPFS: {ipfs_hash}")
+                        create_opreturn_transaction(ipfs_hash)  # Passa o hash IPFS como argumento
                     except Exception as e:
-                        print(f"Error creating OP_RETURN transaction: {e}")
+                        print(f"Erro ao criar transação OP_RETURN: {e}")
 
+                    # Emite o evento via Socket.IO
                     socketio.emit("payment_confirmed", {
                         "txid": txid,
                         "status": "confirmed",
                         "time": transaction.get("blocktime", time.time()),
-                        "amount": amount,
+                        "amount": float(amount),  # Converte Decimal para float
                         "address": address
                     })
 
             conn.close()
         except Exception as e:
             print(f"Erro ao monitorar transações: {e}")
+            
 
 def create_random_wallet(prefix="copyright_plat_"):
     """Cria uma nova carteira com um prefixo aleatório."""
@@ -375,11 +393,16 @@ def confirm_transaction(txid):
 
 
 @app.route('/api/transaction/opreturn', methods=['POST'])
-def create_opreturn_transaction(data):
+def create_opreturn_transaction():
     """
     Cria uma transação OP_RETURN com o hash fornecido.
     """
     try:
+        # Obtém o hash IPFS enviado pelo cliente
+        data = request.form.get('data')  # Hash IPFS
+        if not data:
+            return jsonify({"status": "error", "message": "O campo 'data' é obrigatório!"}), 400
+
         # Valida o hash (deve ser uma string hexadecimal)
         try:
             bytes.fromhex(data)
@@ -397,7 +420,6 @@ def create_opreturn_transaction(data):
         # Obtém UTXOs disponíveis
         utxos = rpc.listunspent(1)
         utxos = [utxo for utxo in utxos if utxo['spendable']]
-
         if not utxos:
             raise ValueError("Sem fundos disponíveis para criar a transação.")
 
@@ -411,31 +433,42 @@ def create_opreturn_transaction(data):
         change_address = rpc.getrawchangeaddress()
         fee = Decimal('0.0001')
         change_amount = Decimal(amount) - fee
-
         if change_amount <= 0:
             raise ValueError("Fundos insuficientes para cobrir a taxa de transação!")
 
         # Cria a transação com OP_RETURN
         outputs = {
             "data": data,
-            change_address: float(change_amount)
+            change_address: float(change_amount)  # Convertendo Decimal para float
         }
 
         # Cria, assina e envia a transação
         raw_tx = rpc.createrawtransaction([{"txid": txid, "vout": vout}], outputs)
         signed_tx = rpc.signrawtransactionwithwallet(raw_tx)
-
         if not signed_tx['complete']:
             raise ValueError("Falha ao assinar a transação.")
-
         sent_txid = rpc.sendrawtransaction(signed_tx['hex'])
 
-        print(f"OP_RETURN transaction created successfully! TXID: {sent_txid}")
-        return sent_txid
+        # Salva o TXID da transação OP_RETURN no banco de dados
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE transactions SET op_return_txid = ? WHERE ipfs_hash = ?",
+            (sent_txid, data)
+        )
+        conn.commit()
+        conn.close()
 
+        print(f"OP_RETURN transaction created successfully! TXID: {sent_txid}")
+        return jsonify({
+            "status": "success",
+            "message": "Transação OP_RETURN criada com sucesso!",
+            "op_return_txid": sent_txid
+        })
     except Exception as e:
         print(f"Error creating OP_RETURN transaction: {e}")
-        raise
+        return jsonify({"status": "error", "message": f"Erro inesperado: {str(e)}"}), 500
+    
 
 @app.route('/api/transaction/opreturn/confirm', methods=['POST'])
 def confirm_opreturn_transaction():
@@ -498,7 +531,7 @@ def confirm_opreturn_transaction():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE transactions SET op_return_txid = ? WHERE ipfs_hash = ?",
+            "UPDATE transactions SET op_return = ? WHERE ipfs_hash = ?",
             (sent_txid, data)
         )
         conn.commit()
@@ -514,7 +547,7 @@ def confirm_opreturn_transaction():
     except Exception as e:
         return jsonify({"status": "error", "message": f'Erro inesperado: {str(e)}'}), 500
     
-    
+   
 @app.route('/api/opreturn/download', methods=['GET'])
 def download_from_opreturn():
     """
@@ -570,8 +603,8 @@ def send_transaction():
         # Valida os parâmetros
         if not address:
             return jsonify({"status": "error", "message": "O endereço é obrigatório."}), 400
-        if not amount or not isinstance(amount, (int, float)):
-            return jsonify({"status": "error", "message": "O valor deve ser numérico e maior que zero."}), 400
+        # if not amount or not isinstance(amount, (int, float)):
+        #     return jsonify({f"status": "error", "message": "O valor deve ser numérico e maior que zero."}), 400
 
         # Define a carteira usada para a transação
         wallet_name = "platform_wallet"
@@ -588,10 +621,10 @@ def send_transaction():
         print(f"Conexão RPC estabelecida com a carteira {wallet_name}.")
 
         # Verifica saldo antes de enviar
-        balance = rpc.getbalance()
+        balance = float(rpc.getbalance())
         print(f"Saldo disponível na carteira {wallet_name}: {balance} BTC.")
 
-        if balance < amount:
+        if balance < float(amount):
             return jsonify({
                 "status": "error",
                 "message": f"Saldo insuficiente. Saldo disponível: {balance} BTC."
@@ -636,6 +669,91 @@ def get_transaction_by_hash(txid):
         return jsonify({"status": "success", "message": "Transaction retrieved successfully!", "transaction": transaction})
     except JSONRPCException as e:
         return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
+    
+@app.route('/api/transaction/ipfs/opreturn', methods=['GET'])
+def get_ipfs_from_opreturn():
+    """
+    Consulta uma transação OP_RETURN pelo TXID e retorna o hash IPFS.
+    """
+    try:
+        txid = request.args.get('txid')
+        if not txid:
+            return jsonify({"status": "error", "message": "O parâmetro 'txid' é obrigatório."}), 400
+
+        # Conecta ao Bitcoin Core para obter os detalhes da transação
+        rpc = get_rpc_connection()
+        transaction = rpc.getrawtransaction(txid, True)
+
+        # Extrai os dados do OP_RETURN
+        vout = transaction.get("vout", [])
+        op_return_data = None
+        for output in vout:
+            script_pubkey = output.get("scriptPubKey", {})
+            asm = script_pubkey.get("asm", "")
+            if asm.startswith("OP_RETURN"):
+                # Extrai o dado após OP_RETURN (em hexadecimal)
+                op_return_data = asm.split(" ")[1]
+                break
+
+        if not op_return_data:
+            return jsonify({"status": "error", "message": "Nenhum dado OP_RETURN encontrado nesta transação."}), 404
+
+        # Decodifica o dado OP_RETURN como bytes
+        try:
+            op_return_bytes = bytes.fromhex(op_return_data)
+        except ValueError:
+            return jsonify({"status": "error", "message": "Dado OP_RETURN inválido (não é hexadecimal)."}), 400
+
+        # Verifica se o dado é um hash IPFS válido
+        ipfs_hash = op_return_bytes.decode('utf-8', errors='ignore')  # Ignora erros de decodificação
+        if not (ipfs_hash.startswith("Qm") or ipfs_hash.startswith("bafy")):
+            return jsonify({"status": "error", "message": "O dado OP_RETURN não contém um hash IPFS válido."}), 400
+
+        # Retorna o hash IPFS e o link de download
+        download_url = f"http://127.0.0.1:8080/ipfs/{ipfs_hash}"
+        return jsonify({
+            "status": "success",
+            "message": "Hash IPFS recuperado com sucesso!",
+            "ipfs_hash": ipfs_hash,
+            "download_url": download_url
+        })
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f"Erro RPC: {str(e)}"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Erro inesperado: {str(e)}"}), 500
+    
+    
+@app.route('/api/transaction/ipfs/<txid>', methods=['GET'])
+def get_transaction_ipfs_by_hash(txid):
+    try:
+        rpc = get_rpc_connection()
+        transaction = rpc.getrawtransaction(txid, True)
+
+        # Consulta o banco de dados para obter informações adicionais
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT ipfs_hash FROM transactions WHERE txid = ?", (txid,))
+        result = cursor.fetchone()
+        conn.close()
+
+        ipfs_hash = result[0] if result else None
+        download_url = f"http://127.0.0.1:8080/ipfs/{ipfs_hash}" if ipfs_hash else None
+
+        return jsonify({
+            "status": "success",
+            "message": "Transaction retrieved successfully!",
+            "transaction": {
+                "txid": txid,
+                "details": transaction,
+                "ipfs_hash": ipfs_hash,
+                "download_url": download_url
+            }
+        })
+    except JSONRPCException as e:
+        return jsonify({"status": "error", "message": f'RPC error: {str(e)}'}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f'Unexpected error: {str(e)}'}), 500
+
     
 @app.route('/api/transaction/count', methods=['GET'])
 def get_transaction_count():
@@ -922,9 +1040,6 @@ def execute_rpc_command():
     except Exception as e:
         return jsonify({"status": "error", "message": f'Unexpected error: {str(e)}'}), 500
 
-
-from gevent import monkey
-monkey.patch_all()
 
 if __name__ == '__main__':
     print("Inicializando o sistema...")
