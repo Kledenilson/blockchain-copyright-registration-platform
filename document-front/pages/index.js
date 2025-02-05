@@ -408,9 +408,9 @@ export default function Home() {
                                 })
                                 : "No Date Available"}
                             </p>
-                            {historySelectedTransaction.ipfsHash && (
+                            {historySelectedTransaction.ipfsHash && historySelectedTransaction.confirmations >= 1 && (
                                 <>
-                                    <p><strong>Your authenticity record hash (keep securely):</strong></p> {historySelectedTransaction.ipfsHash}
+                                    <p><strong>Your authenticity record hash (keep securely):</strong> {historySelectedTransaction.ipfsHash}</p> 
                                     <p><strong>Download link: </strong>
                                         <a href={historySelectedTransaction.downloadUrl} target="_blank" rel="noopener noreferrer">
                                             Click here!

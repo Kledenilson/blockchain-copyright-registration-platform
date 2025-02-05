@@ -246,64 +246,65 @@ def ensure_wallet_exists(wallet_name="platform_wallet"):
         raise
     
 def monitor_transactions():
-    rpc = get_rpc_connection("platform_wallet")
-    while True:
-        time.sleep(10)
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, txid, ipfs_hash FROM transactions WHERE status = 'pending'")
-            pending_transactions = cursor.fetchall()
+    with app.app_context():  # Garante que a função seja executada dentro do contexto da aplicação Flask
+        rpc = get_rpc_connection("platform_wallet")
+        while True:
+            time.sleep(10)
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, txid, ipfs_hash FROM transactions WHERE status = 'pending' AND op_return_txid IS NOT NULL")
+                pending_transactions = cursor.fetchall()
 
-            for tx_id, txid, ipfs_hash in pending_transactions:
-                try:
-                    # Verifica se o TXID é válido
-                    if not txid or txid.strip() == "":
-                        print(f"TXID inválido para transação ID {tx_id}. Ignorando...")
-                        continue
+                if len(pending_transactions) >= 1:
+                
+                    for tx_id, txid, ipfs_hash in pending_transactions:
+                        try:
+                            transaction = rpc.gettransaction(txid)
+                        except Exception as e:
+                            print(f"Error fetching transaction {txid}: {e}")
+                            continue
 
-                    # Obtém os detalhes da transação
-                    transaction = rpc.gettransaction(txid)
-                except Exception as e:
-                    print(f"Erro ao buscar transação {txid}: {e}")
-                    continue
+                        confirmations = transaction.get("confirmations", 0)
+                        if confirmations >= 1:
+                            address = None
+                            amount = 0
+                            details = transaction.get("details", [])
+                            if details and isinstance(details, list):
+                                address = details[0].get("address", "unknown")
+                                amount = details[0].get("amount", 0)
 
-                confirmations = transaction.get("confirmations", 0)
-                if confirmations >= 1:
-                    address = None
-                    amount = 0
-                    details = transaction.get("details", [])
-                    if details and isinstance(details, list):
-                        address = details[0].get("address", "unknown")
-                        amount = details[0].get("amount", 0)
+                            if not address:
+                                print(f"Warning: No valid address found for TXID {txid}")
+                                continue                       
 
-                    if not address:
-                        print(f"Aviso: Nenhum endereço válido encontrado para TXID {txid}")
-                        continue
+                            # Cria a transação OP_RETURN com o hash IPFS
+                            try:
+                                data_origin = ipfs_hash.encode('utf-8')
+                                ipfs_hash = data_origin.hex()
+                                op_return_data = create_opreturn_transaction(ipfs_hash)  # Passa o hash IPFS como argumento
+                                
+                                if op_return_data:
+                                    # Atualiza o status da transação no banco de dados para 'confirmed'
+                                    op_return_txid = op_return_data.get(op_return_txid)
+                                    cursor.execute("UPDATE transactions SET status = 'confirmed' WHERE id = ?", (tx_id,))
+                                    conn.commit()
+                                
+                            except Exception as e:
+                                print(f"Error creating OP_RETURN transaction: {e}")
 
-                    # Atualiza o status da transação no banco de dados para 'confirmed'
-                    cursor.execute("UPDATE transactions SET status = 'confirmed' WHERE id = ?", (tx_id,))
-                    conn.commit()
+                            # Emite o evento via Socket.IO
+                            # socketio.emit("payment_confirmed", {
+                            #     "txid": txid,
+                            #     "status": "confirmed",
+                            #     "time": transaction.get("blocktime", time.time()),
+                            #     "amount": float(amount),
+                            #     "address": address
+                            # })
 
-                    # Cria a transação OP_RETURN com o hash IPFS
-                    try:
-                        print(f"Criando transação OP_RETURN para hash IPFS: {ipfs_hash}")
-                        create_opreturn_transaction(ipfs_hash)  # Passa o hash IPFS como argumento
-                    except Exception as e:
-                        print(f"Erro ao criar transação OP_RETURN: {e}")
-
-                    # Emite o evento via Socket.IO
-                    socketio.emit("payment_confirmed", {
-                        "txid": txid,
-                        "status": "confirmed",
-                        "time": transaction.get("blocktime", time.time()),
-                        "amount": float(amount),  # Converte Decimal para float
-                        "address": address
-                    })
-
-            conn.close()
-        except Exception as e:
-            print(f"Erro ao monitorar transações: {e}")
+                    conn.close()
+            except Exception as e:
+                print(f"Erro ao monitorar transações: {e}")
             
 
 def create_random_wallet(prefix="copyright_plat_"):
@@ -392,27 +393,12 @@ def confirm_transaction(txid):
         return jsonify({"status": "error", "message": f"Erro inesperado: 3 {str(e)}"}), 500
 
 
-@app.route('/api/transaction/opreturn', methods=['POST'])
-def create_opreturn_transaction():
+# @app.route('/api/transaction/opreturn', methods=['POST'])
+def create_opreturn_transaction(data):
     """
     Cria uma transação OP_RETURN com o hash fornecido.
     """
     try:
-        # Obtém o hash IPFS enviado pelo cliente
-        data = request.form.get('data')  # Hash IPFS
-        if not data:
-            return jsonify({"status": "error", "message": "O campo 'data' é obrigatório!"}), 400
-
-        # Valida o hash (deve ser uma string hexadecimal)
-        try:
-            bytes.fromhex(data)
-        except ValueError:
-            raise ValueError("O campo 'data' deve ser um hash hexadecimal válido!")
-
-        # Valida o tamanho do hash para o OP_RETURN (máximo de 80 bytes)
-        if len(data) > 160:
-            raise ValueError("O hash excede o limite de 80 bytes para o OP_RETURN!")
-
         # Conecta à carteira padrão
         wallet_name = "platform_wallet"
         rpc = get_rpc_connection(wallet_name)
@@ -439,7 +425,7 @@ def create_opreturn_transaction():
         # Cria a transação com OP_RETURN
         outputs = {
             "data": data,
-            change_address: float(change_amount)  # Convertendo Decimal para float
+            change_address: float(change_amount)
         }
 
         # Cria, assina e envia a transação
@@ -453,7 +439,7 @@ def create_opreturn_transaction():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE transactions SET op_return_txid = ? WHERE ipfs_hash = ?",
+            "UPDATE transactions SET op_return_txid = ? WHERE hash = ?",
             (sent_txid, data)
         )
         conn.commit()
@@ -467,7 +453,7 @@ def create_opreturn_transaction():
         })
     except Exception as e:
         print(f"Error creating OP_RETURN transaction: {e}")
-        return jsonify({"status": "error", "message": f"Erro inesperado: {str(e)}"}), 500
+        raise
     
 
 @app.route('/api/transaction/opreturn/confirm', methods=['POST'])
